@@ -3,8 +3,9 @@
 Tests for plugins/deadlion/skills/suckless-code/scripts/dl-size.
 
 Fixtures live under pytest's tmp_path, outside any git repository, so
-directory arguments exercise the os.walk enumeration. lizard is masked off
-PATH so results do not depend on it being installed.
+directory arguments exercise the os.walk enumeration. PATH is an empty
+directory, so results do not depend on lizard being installed; a pip install
+puts lizard next to python3, so "only python3's directory" would not hide it.
 
 Usage:
     pytest tests/test_dl_size.py -v
@@ -15,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -23,12 +25,14 @@ LIZARD = shutil.which("lizard")
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SCRIPT = PROJECT_ROOT / "plugins" / "deadlion" / "skills" / "suckless-code" / "scripts" / "dl-size"
+# dl-size is started through sys.executable, so it needs nothing on PATH.
+EMPTY_PATH = tempfile.TemporaryDirectory()
 
 
 def run(args, cwd, stdin="", env=None):
-    """Run dl-size with only python3 on PATH and no DL_* settings, plus ENV."""
+    """Run dl-size with an empty PATH and no DL_* settings, plus ENV."""
     full_env = {k: v for k, v in os.environ.items() if not k.startswith("DL_")}
-    full_env["PATH"] = str(Path(sys.executable).parent)
+    full_env["PATH"] = EMPTY_PATH.name
     full_env.update(env or {})
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], cwd=cwd, input=stdin,
