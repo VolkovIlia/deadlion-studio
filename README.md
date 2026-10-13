@@ -78,26 +78,21 @@ Subagents: `researcher` (web + code research, evidence-tagged), `implementer`
 
 ## Workflow
 
-```mermaid
-flowchart LR
-  P[product-discovery] --> D[ux-design]
-  D --> S[decompose]
-  P --> S
-  S --> A[unix-design]
-  D --> A
-  P --> A
-  A --> W[write-plan]
-  W --> B[build]
-  B --> U[ui-verify]
-  B --> R[review]
-  U --> V[verify]
-  R --> V
-  V -.-> REL[release]
-```
+Stages run top to bottom. The `workflow` skill picks the ones the change needs
+and asks you to approve each artifact before the next; any stage also runs alone.
 
-Each stage can run alone or be skipped; the `workflow` skill picks the stages by
-the size of the change and asks you to approve each artifact before the next.
-`decompose` runs only for systems of more than one program.
+| # | Stage | Skill | Runs when | Writes |
+|---|---|---|---|---|
+| 1 | Product | `product-discovery` | value or users are unclear | `product.md` |
+| 2 | Design | `ux-design` | the change has a UI | `design.md` |
+| 3 | Decompose | `decompose` | the system is more than one program | `.dev-docs/system.md` |
+| 4 | Architecture | `unix-design` | a new component or interface | `arch.md` |
+| 5 | Plan | `write-plan` | the change is larger than one file | `plan.md` |
+| 6 | Build | `build` | always | code, ticks `plan.md` tasks |
+| 7 | UI check | `ui-verify` | the change has a UI | fixes until the design gates pass |
+| 8 | Review | `review` | the change is larger than one file | `review.md` |
+| 9 | Verify | `verify` | always | VERIFIED / NOT VERIFIED report |
+| 10 | Release | `release` | only when you ask | tag, tarball, `.sha256` |
 
 ## Artifact contract
 
