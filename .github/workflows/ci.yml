@@ -21,5 +21,12 @@ jobs:
         run: pip install -r requirements-dev.txt && pytest tests -q
       - name: export-skills
         run: sh tests/test_export_skills.sh
+      # The npm package ships the real binary as a per-platform optional
+      # dependency; when its download is skipped, install.cjs places it.
+      - name: claude CLI
+        run: |
+          npm i -g @anthropic-ai/claude-code --include=optional
+          claude --version || node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
+          claude --version
       - name: claude plugin validate
-        run: npm i -g @anthropic-ai/claude-code && for p in plugins/*/; do claude plugin validate "$p" --strict; done
+        run: for p in plugins/*/; do claude plugin validate "$p" --strict; done
