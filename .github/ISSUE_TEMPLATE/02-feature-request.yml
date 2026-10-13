@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a skill, tool, template or a change to an existing one
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What do you try to do, and where does the plugin get in the way or fall short?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: The skill, tool or rule you want, and how you would know it works.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Existing tools, other plugins, or doing it by hand.
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Fit
+      options:
+        - label: The change keeps the suckless limits (small skills, stdlib-only tools, no new runtime dependencies).

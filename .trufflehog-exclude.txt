@@ -1,0 +1,15 @@
+// Paths excluded from the TruffleHog pre-commit scan.
+// One regex per line, matched against the path relative to the scan root.
+//
+// Keep this list to vendored/generated/large trees only. Never exclude application
+// source, deployment manifests, CI config, or tests: a real credential pasted into
+// a test log is one of the most common ways secrets actually leak, and the hook's
+// --results=verified filter already keeps fake fixtures from causing noise.
+^\.git/
+^venv/
+^\.venv/
+^node_modules/
+^\.mypy_cache/
+^\.ruff_cache/
+^\.pytest_cache/
+// Project-specific additions go below (build output, uploads, vendored SDKs, ...).

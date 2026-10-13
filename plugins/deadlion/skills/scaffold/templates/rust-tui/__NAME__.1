@@ -1,0 +1,58 @@
+.TH __NAME__ 1 __NAME__\-VERSION
+.SH NAME
+__NAME__ \- pick a line interactively
+.SH SYNOPSIS
+.B __NAME__
+.RB [ \-v ]
+.SH DESCRIPTION
+.B __NAME__
+reads lines from standard input and draws them as a list on
+.IR /dev/tty .
+Typing filters the list; the chosen line is printed on standard output.
+Because only the result goes to standard output,
+.B __NAME__
+works in any pipeline, terminal or tmux pane.
+.SH OPTIONS
+.TP
+.B \-v
+print version information to standard output, then exit.
+.SH USAGE
+.TP
+.I text
+filter the list (case-insensitive substring).
+.TP
+.BR Up ", " Ctrl\-p
+move the selection up.
+.TP
+.BR Down ", " Ctrl\-n
+move the selection down.
+.TP
+.B Backspace
+delete the last filter character.
+.TP
+.B Enter
+print the selected line and exit.
+.TP
+.BR Esc ", " Ctrl\-c
+cancel.
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+when non-empty, no colours are drawn; the selection is shown in reverse video.
+.TP
+.B TERM
+.B dumb
+makes
+.B __NAME__
+exit with an error, as it cannot draw.
+.SH EXIT STATUS
+.TP
+0
+A line was picked.
+.TP
+1
+Cancelled, no input, or an error.
+.SH EXAMPLE
+.EX
+git branch \-\-format='%(refname:short)' | __NAME__ | xargs git switch
+.EE

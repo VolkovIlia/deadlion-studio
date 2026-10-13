@@ -1,0 +1,54 @@
+repos:
+  # Secrets detection - CRITICAL priority
+  # Declared local: the entry and language below fully override the upstream hook,
+  # so pinning + cloning trufflesecurity/trufflehog would only add a no-op clone.
+  # Requires the trufflehog binary on PATH — see the setup instructions at the
+  # bottom of this file, and VERIFY it is real (`trufflehog --version` must print a
+  # version). A stub on PATH that just `exit 0`s turns this whole gate into theatre.
+  - repo: local
+    hooks:
+      - id: trufflehog
+        name: TruffleHog (detect secrets)
+        description: Scan staged files for API keys, tokens, passwords, and credentials
+        # --fail: exit 183 on findings. WITHOUT IT THE HOOK ONLY PRINTS and never
+        #   blocks a commit — the default invocation is decorative.
+        # --results=verified: only credentials TruffleHog confirms are LIVE block the
+        #   commit. Test fixtures full of fake JWTs never verify, so tests/ can stay in
+        #   scope — a real token committed into a test log is exactly the leak this
+        #   gate exists to catch.
+        # --exclude-detectors=Lob: Lob's verifier returns success for arbitrary
+        #   strings; in a real repo it reported hundreds of Python test function names
+        #   as verified live keys. Keep this the ONLY detector exclusion, and add more
+        #   only with the same kind of evidence.
+        entry: bash -c 'trufflehog filesystem "$@" --no-update --results=verified --exclude-detectors=Lob --fail --exclude-paths=.trufflehog-exclude.txt' --
+        language: system
+        pass_filenames: true
+
+  # Large files, binaries, forbidden directories and secret-file names
+  - repo: local
+    hooks:
+      - id: dl-guard
+        name: dl-guard (large files, binaries, forbidden paths)
+        entry: plugins/deadlion/skills/commit/scripts/dl-guard
+        language: system
+        pass_filenames: true
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-json
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+# Setup:
+# 1. pip install pre-commit
+# 2. The trufflehog hook needs the binary on PATH (it is NOT pip-installable):
+#      curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
+#        | sh -s -- -b ~/.local/bin
+#    Then CHECK it: `trufflehog --version` must print a version.
+# 3. pre-commit install
+# 4. pre-commit run --all-files

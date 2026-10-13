@@ -1,0 +1,22 @@
+{
+  "name": "deadlion-studio",
+  "owner": {
+    "name": "Ilia Volkov",
+    "email": "ilia.volkov@outlook.com"
+  },
+  "description": "Suckless/Unix engineering, product discovery and UI/UX workflow for Claude Code",
+  "plugins": [
+    {
+      "name": "deadlion",
+      "source": "./plugins/deadlion",
+      "description": "Core: suckless/Unix engineering, product discovery and UI/UX workflow skills, hooks and agents",
+      "version": "4.2.0"
+    },
+    {
+      "name": "deadlion-triz",
+      "source": "./plugins/deadlion-triz",
+      "description": "TRIZ inventive problem solving for contradictions and trade-offs",
+      "version": "4.0.0"
+    }
+  ]
+}

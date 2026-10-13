@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or help
+    url: https://github.com/VolkovIlia/deadlion-studio/discussions/categories/q-a
+    about: Ask how to use a skill or tool.
+  - name: Security vulnerability
+    url: https://github.com/VolkovIlia/deadlion-studio/security/advisories/new
+    about: Report privately, never in a public issue.

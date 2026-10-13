@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""dl-guard: block files that do not belong in a git commit.
+
+Usage: dl-guard [--hook] [FILE...]
+
+Without FILE, checks the staged files. Prints `path:1: reason` per violation
+on stdout. Exit 0 clean, 1 violations, 2 usage or IO error. `--hook` reads
+Claude hook JSON on stdin and, for `git commit` commands only, checks the
+staged files, prints violations on stderr and exits 2 to block the commit.
+Explicit FILEs that do not exist (deleted files) are skipped.
+"""
+
+import fnmatch
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import PurePath
+
+# Limits: config in source, env override.
+#   env var                default  meaning
+#   DL_GUARD_MAX_KB        500      max size per file, KB
+#   DL_GUARD_MAX_TOTAL_MB  10       max total size of the commit, MB
+#   DL_GUARD_MAX_FILES     100      max files in one commit
+#   DL_HOOKS               1        0 makes --hook exit 0 immediately
+LIMITS = {"DL_GUARD_MAX_KB": 500, "DL_GUARD_MAX_TOTAL_MB": 10,
+          "DL_GUARD_MAX_FILES": 100}
+
+FORBIDDEN_EXTENSIONS = frozenset((
+    # video
+    ".mp4 .webm .avi .mov .mkv .flv .wmv .m4v .mpeg .mpg .3gp"
+    # audio
+    " .mp3 .wav .ogg .flac .aac .wma .m4a"
+    # images (small icons and docs images go through ALLOWED_PATTERNS)
+    " .png .jpg .jpeg .gif .bmp .tiff .webp .ico .svg .psd .ai .sketch"
+    # executables
+    " .exe .dll .so .dylib .bin .msi .dmg .deb .rpm .apk .ipa"
+    # archives
+    " .zip .tar .gz .bz2 .7z .rar .xz .tar.gz .tgz"
+    # databases
+    " .db .sqlite .sqlite3 .db-shm .db-wal .mdb .accdb"
+    # logs
+    " .log .logs"
+    # build artifacts
+    " .pyc .pyo .class .o .obj .a .lib .whl .egg"
+    # editor files
+    " .swp .swo .swn .bak .backup .tmp .temp .cache"
+    # secrets and credentials
+    " .pem .key .p12 .pfx .keystore .jks .cer .crt"
+).split())
+
+# Matched against every directory component; shell globs allowed.
+FORBIDDEN_DIRECTORIES = (
+    "node_modules/ __pycache__/ .venv/ venv/ env/ .env/ vendor/ packages/"
+    " bower_components/ dist/ build/ out/ target/ .next/ .nuxt/ .output/"
+    " coverage/ .nyc_output/ test-results/ playwright-report/ allure-results/"
+    " test-videos/ screenshots/ .idea/ .vscode/ .vs/ *.xcworkspace/"
+    " *.xcodeproj/ .cache/ .pytest_cache/ .mypy_cache/ .ruff_cache/"
+    " .eslintcache/ .parcel-cache/ .DS_Store/ Thumbs.db/ __MACOSX/"
+    " .telemetry/ .logs/"
+).split()
+
+# Secret-bearing DATA files, matched case-insensitively against the basename
+# with re.match. Files with a SOURCE_CODE_EXTENSIONS suffix are exempt.
+FORBIDDEN_PATTERNS = (
+    r"^\.env.*", r".*\.env$", r"^secrets?\.", r"^credentials?\.",
+    r"^api[_-]?key", r"^auth[_-]?token", r".*password.*",
+    r".*\.csv$", r".*\.xlsx?$", r".*\.parquet$", r".*\.feather$",
+    r".*\.min\.js$", r".*\.min\.css$", r".*\.bundle\.js$", r".*-bundle\.",
+)
+
+# Source files legitimately carry the same words (ApiKeysModal.vue,
+# apiKeyService.ts, test_password_reset.py). Prose and shell scripts
+# (.md .rst .sh .bash) are deliberately absent: they can carry pasted secrets.
+SOURCE_CODE_EXTENSIONS = frozenset(
+    ".vue .ts .tsx .js .jsx .mjs .cjs .py .rb .go .rs .java .kt .swift .cs"
+    " .php .c .h .cpp .hpp .css .scss .sass .less .html .htm".split()
+)
+
+# (glob, max KB): a match overrides every forbidden rule but its size cap.
+ALLOWED_PATTERNS = (
+    ("favicon.ico", 50),
+    ("logo.png", 100),
+    ("icon-*.png", 50),
+    ("docs/images/*", 200),
+    ("*.schema.json", 100),
+    ("contracts/*.yaml", 1024),
+    ("contracts/*.math.md", 1024),
+)
+
+# Extensions and names never inspected for binary content.
+TEXT_EXTENSIONS = frozenset(
+    ".py .js .ts .jsx .tsx .json .yaml .yml .md .txt .html .css .scss .less"
+    " .xml .sh .bash .zsh .fish .ps1 .bat .cmd .go .rs .rb .php .java .kt"
+    " .swift .c .h .cpp .hpp .cs .sql .graphql .proto .toml .ini .cfg .conf"
+    " .env .gitignore .dockerignore .editorconfig .prettierrc .eslintrc".split()
+)
+TEXT_NAMES = frozenset(
+    "dockerfile makefile rakefile gemfile pipfile .gitignore .dockerignore"
+    " .editorconfig .prettierrc".split()
+)
+
+MAGIC_BYTES = (
+    b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"%PDF", b"PK\x03\x04", b"\x1f\x8b",
+    b"MZ", b"\x7fELF", b"\x00\x00\x00\x18ftypmp", b"\x1a\x45\xdf\xa3",
+    b"SQLite format",
+)
+
+COMMIT_RE = re.compile(r"\bgit\s+commit\b")
+
+
+class UsageError(Exception):
+    """Bad invocation or failing git; reported with exit 2."""
+
+
+def limit(name):
+    """Return the integer limit for NAME, honouring the environment."""
+    raw = os.environ.get(name, "")
+    try:
+        return int(raw) if raw else LIMITS[name]
+    except ValueError:
+        raise UsageError(f"{name} must be an integer, got {raw!r}")
+
+
+def allowed_limit(path, allowed=ALLOWED_PATTERNS):
+    """Return the KB cap of the first allowed pattern matching PATH, or None."""
+    for pattern, max_kb in allowed:
+        if fnmatch.fnmatch(path, pattern):
+            return max_kb
+    return None
+
+
+def forbidden_extension(path):
+    """Return the forbidden extension of PATH (compound first), or None."""
+    suffixes = [s.lower() for s in PurePath(path).suffixes]
+    for ext in ["".join(suffixes)] + suffixes:
+        if ext in FORBIDDEN_EXTENSIONS:
+            return ext
+    return None
+
+
+def forbidden_directory(path):
+    """Return the forbidden directory (with trailing /) containing PATH.
+
+    The child of a `skills/` directory is a skill's name (Agent Skills
+    layout), so a skill called `build` or `dist` is not build output.
+    """
+    parts = PurePath(path).parts[:-1]
+    for i, part in enumerate(parts):
+        if i > 0 and parts[i - 1] == "skills":
+            continue
+        for entry in FORBIDDEN_DIRECTORIES:
+            if fnmatch.fnmatchcase(part, entry[:-1]):
+                return part + "/"
+    return None
+
+
+def forbidden_pattern(path, allowed=ALLOWED_PATTERNS):
+    """Return the secret-file pattern matching PATH's name, or None."""
+    if allowed_limit(path, allowed) is not None:
+        return None
+    if PurePath(path).suffix.lower() in SOURCE_CODE_EXTENSIONS:
+        return None
+    name = PurePath(path).name
+    for pattern in FORBIDDEN_PATTERNS:
+        if re.match(pattern, name, re.IGNORECASE):
+            return pattern
+    return None
+
+
+def staged_blob(path, size_only):
+    """Return the index size (int) or content (bytes) of PATH, or None."""
+    cmd = ["git", "cat-file", "-s" if size_only else "blob", f":0:{path}"]
+    try:
+        result = subprocess.run(cmd, capture_output=True)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return int(result.stdout) if size_only else result.stdout
+
+
+def file_size(path):
+    """Return PATH's size in bytes from disk, else from the index, else 0."""
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+    return staged_blob(path, size_only=True) or 0
+
+
+def head_bytes(path):
+    """Return the first 8 KB of PATH from disk, else from the index."""
+    if os.path.isfile(path):
+        with open(path, "rb") as handle:
+            return handle.read(8192)
+    return (staged_blob(path, size_only=False) or b"")[:8192]
+
+
+def is_binary(path):
+    """True when PATH is not a known text file and looks binary."""
+    p = PurePath(path)
+    if p.suffix.lower() in TEXT_EXTENSIONS or p.name.lower() in TEXT_NAMES:
+        return False
+    try:
+        chunk = head_bytes(path)
+    except OSError:
+        return False
+    return b"\x00" in chunk or chunk.startswith(MAGIC_BYTES)
+
+
+def check_file(path):
+    """Return the violation reasons for one file."""
+    directory = forbidden_directory(path)
+    if directory:
+        return [f"forbidden directory {directory}"]
+    reasons = []
+    max_kb = allowed_limit(path)
+    ext = forbidden_extension(path)
+    if ext and max_kb is None:
+        reasons.append(f"forbidden extension {ext}")
+    pattern = forbidden_pattern(path)
+    if pattern:
+        reasons.append(f"matches secret-file pattern {pattern}")
+    cap = limit("DL_GUARD_MAX_KB") if max_kb is None else max_kb
+    if file_size(path) > cap * 1024:
+        reasons.append(f"exceeds {cap} KB")
+    if max_kb is None and is_binary(path):
+        reasons.append("binary file")
+    return reasons
+
+
+def check_totals(files):
+    """Return commit-wide violations for FILES."""
+    found = []
+    max_files = limit("DL_GUARD_MAX_FILES")
+    if len(files) > max_files:
+        found.append(f"(commit):1: {len(files)} files exceeds {max_files}")
+    max_mb = limit("DL_GUARD_MAX_TOTAL_MB")
+    total_mb = sum(file_size(f) for f in files) / (1024 * 1024)
+    if total_mb > max_mb:
+        found.append(f"(commit):1: total {total_mb:.1f} MB exceeds {max_mb} MB")
+    return found
+
+
+def check(files):
+    """Return every violation line for FILES."""
+    found = []
+    for path in files:
+        found.extend(f"{path}:1: {reason}" for reason in check_file(path))
+    return found + check_totals(files)
+
+
+def git(*args):
+    """Run git with ARGS and return stdout lines; raise UsageError on failure."""
+    try:
+        result = subprocess.run(["git", *args], capture_output=True, text=True)
+    except OSError as err:
+        raise UsageError(f"git: {err.strerror}")
+    if result.returncode != 0:
+        raise UsageError(result.stderr.strip() or f"git {args[0]} failed")
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def staged_files():
+    """Move to the repository root and return the staged file paths."""
+    os.chdir(git("rev-parse", "--show-toplevel")[0])
+    return git("diff", "--cached", "--name-only", "--diff-filter=ACMR")
+
+
+def hook():
+    """Run in Claude hook mode; return the exit status."""
+    if os.environ.get("DL_HOOKS") == "0":
+        return 0
+    try:
+        command = json.load(sys.stdin)["tool_input"]["command"]
+    except (ValueError, KeyError, TypeError):
+        return 0
+    if not isinstance(command, str) or not COMMIT_RE.search(command):
+        return 0
+    found = check(staged_files())
+    for line in found:
+        print(line, file=sys.stderr)
+    return 2 if found else 0
+
+
+def main(argv):
+    args = argv[1:]
+    if args[:1] == ["--hook"]:
+        return hook() if len(args) == 1 else usage()
+    if any(a.startswith("-") for a in args):
+        return usage()
+    files = [f for f in args if os.path.isfile(f)] if args else staged_files()
+    found = check(files)
+    for line in found:
+        print(line)
+    return 1 if found else 0
+
+
+def usage():
+    print("dl-guard: usage: dl-guard [--hook] [FILE...]", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except UsageError as err:
+        print(f"dl-guard: {err}", file=sys.stderr)
+        sys.exit(2)

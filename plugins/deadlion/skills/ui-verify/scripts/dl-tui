@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""dl-tui: drive a terminal program in a headless tmux and print its screens.
+
+Usage: dl-tui [-s COLSxROWS] CMD [STEP...]
+
+CMD is one shell command string, run by /bin/sh in a COLSxROWS pane
+(default 80x24) whose working directory is the current one. STEPs run in
+order:
+  key:NAME            send a tmux key (Down, Enter, Escape, C-c, BSpace, ...)
+  text:STRING         type STRING literally
+  resize:COLSxROWS    resize the window
+  wait:MS             sleep MS milliseconds
+  snap                print a screen block
+After the start and after every step the screen is left to settle (until
+it is unchanged for 100 ms, at most DL_TUI_SETTLE_MS). One screen block is
+printed per snap and once at the end: the screen lines, right-stripped and
+without trailing empty lines, then a footer `-- COLSxROWS running`,
+`-- COLSxROWS exit N` or, when a signal killed the program,
+`-- COLSxROWS signal N`. Exit 0 when the script ran, whatever the
+program's status; 2 on usage or tmux errors.
+"""
+
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+# Limits: config in source, env override.
+#   env var            default  meaning
+#   DL_TUI_SETTLE_MS   2000     max wait for the screen to stop changing
+LIMITS = {"DL_TUI_SETTLE_MS": 2000}
+
+POLL_S = 0.025
+STABLE_S = 0.1
+SIZE_RE = re.compile(r"^([1-9]\d{0,3})x([1-9]\d{0,3})$")
+CONF = ("set-option -g status off\n"
+        "set-option -wg remain-on-exit on\n"
+        "set-option -wg remain-on-exit-format ''\n")
+# `|`-separated so empty fields survive: tmux leaves pane_dead_status empty
+# after a signal death and pane_dead_signal empty after a normal exit.
+STATE_FMT = ("#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|"
+             "#{window_width}x#{window_height}")
+USAGE = "usage: dl-tui [-s COLSxROWS] CMD [STEP...]"
+
+
+class UsageError(Exception):
+    """Bad invocation or a failing tmux command; reported with exit 2."""
+
+
+def limit(name):
+    """Return the integer limit for NAME, honouring the environment."""
+    raw = os.environ.get(name, "")
+    try:
+        return int(raw) if raw else LIMITS[name]
+    except ValueError:
+        raise UsageError(f"{name} must be an integer, got {raw!r}")
+
+
+def parse_size(text):
+    """Return (cols, rows) for TEXT, or None when it is not COLSxROWS."""
+    match = SIZE_RE.match(text)
+    return (int(match[1]), int(match[2])) if match else None
+
+
+def parse_step(step):
+    """Return the tmux action tuple for one STEP argument."""
+    kind, _, arg = step.partition(":")
+    if step == "snap":
+        return ("snap",)
+    if kind in ("key", "text") and arg:
+        return (kind, arg)
+    if kind == "resize" and parse_size(arg):
+        return ("resize", *parse_size(arg))
+    if kind == "wait" and arg.isdigit():
+        return ("wait", int(arg))
+    raise UsageError(f"bad step {step}")
+
+
+def parse_args(args):
+    """Return ((cols, rows), CMD, [step tuples]) for the argument list."""
+    size = (80, 24)
+    if args[:1] == ["-s"] and len(args) > 1:
+        size = parse_size(args[1])
+        if size is None:
+            raise UsageError(f"bad size {args[1]}")
+        args = args[2:]
+    if not args or args[0].startswith("-"):
+        raise UsageError(USAGE)
+    return size, args[0], [parse_step(s) for s in args[1:]]
+
+
+class Tmux:
+    """A private tmux server on its own socket and config file."""
+
+    def __init__(self, conf):
+        self.base = ["tmux", "-L", f"dl-tui-{os.getpid()}", "-f", conf]
+        self.env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+
+    def __call__(self, *args):
+        """Run one tmux command; return its stdout or raise UsageError."""
+        done = subprocess.run([*self.base, *args], capture_output=True,
+                              text=True, env=self.env)
+        if done.returncode != 0:
+            first = (done.stderr.splitlines() or [f"exit {done.returncode}"])[0]
+            raise UsageError(f"tmux: {first}")
+        return done.stdout
+
+    def kill(self):
+        subprocess.run([*self.base, "kill-server"], capture_output=True,
+                       env=self.env)
+
+
+def screen(tmux):
+    """Return (pane text, state line) as tmux sees them now."""
+    return (tmux("capture-pane", "-p", "-t", "dl"),
+            tmux("display-message", "-p", "-t", "dl", STATE_FMT))
+
+
+def settle(tmux, settle_s):
+    """Poll until the screen is unchanged for STABLE_S; return it."""
+    deadline = time.monotonic() + settle_s
+    last, since = None, time.monotonic()
+    while True:
+        now = time.monotonic()
+        current = screen(tmux)
+        if current != last:
+            last, since = current, now
+        # A screen that keeps changing still stops at the deadline.
+        if now - since >= STABLE_S or now >= deadline:
+            return current
+        time.sleep(POLL_S)
+
+
+def block(state):
+    """Format one screen block from a (pane text, state line) pair."""
+    text, info = state
+    lines = [line.rstrip() for line in text.split("\n")]
+    while lines and not lines[-1]:
+        lines.pop()
+    dead, status, signal, size = info.strip().split("|")
+    footer = f"-- {size} running"
+    if dead == "1":
+        footer = f"-- {size} signal {signal}" if signal else f"-- {size} exit {status}"
+    return "".join(f"{line}\n" for line in lines + [footer])
+
+
+def apply(tmux, step):
+    """Perform one non-snap step."""
+    kind = step[0]
+    if kind == "key":
+        tmux("send-keys", "-t", "dl", step[1])
+    elif kind == "text":
+        tmux("send-keys", "-t", "dl", "-l", step[1])
+    elif kind == "resize":
+        tmux("resize-window", "-t", "dl", "-x", str(step[1]), "-y", str(step[2]))
+    else:
+        time.sleep(step[1] / 1000)
+
+
+def drive(tmux, size, cmd, steps):
+    """Start CMD, run STEPS and print the screen blocks."""
+    settle_s = limit("DL_TUI_SETTLE_MS") / 1000
+    tmux("new-session", "-d", "-s", "dl", "-x", str(size[0]), "-y", str(size[1]),
+         "-c", os.getcwd(), "/bin/sh", "-c", cmd)
+    state = settle(tmux, settle_s)
+    for step in steps:
+        if step[0] == "snap":
+            sys.stdout.write(block(state))
+            continue
+        apply(tmux, step)
+        state = settle(tmux, settle_s)
+    sys.stdout.write(block(state))
+
+
+def exit_on_signal(signum, _frame):
+    """Turn SIGTERM/SIGHUP into SystemExit so `finally` kills the tmux server;
+    the server has daemonized and would otherwise outlive dl-tui."""
+    sys.exit(128 + signum)
+
+
+def main(argv):
+    size, cmd, steps = parse_args(argv[1:])
+    if shutil.which("tmux") is None:
+        raise UsageError("tmux not on PATH")
+    with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as conf:
+        conf.write(CONF)
+    tmux = Tmux(conf.name)
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, exit_on_signal)
+    try:
+        drive(tmux, size, cmd, steps)
+    finally:
+        tmux.kill()
+        os.unlink(conf.name)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except UsageError as err:
+        print(f"dl-tui: {err}", file=sys.stderr)
+        sys.exit(2)

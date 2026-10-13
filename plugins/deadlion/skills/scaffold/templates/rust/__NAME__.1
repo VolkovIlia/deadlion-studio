@@ -1,0 +1,30 @@
+.TH __NAME__ 1 __NAME__\-VERSION
+.SH NAME
+__NAME__ \- copy files to standard output
+.SH SYNOPSIS
+.B __NAME__
+.RB [ \-v ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B __NAME__
+writes each
+.I file
+in order to standard output.
+With no
+.IR file ,
+or when
+.I file
+is
+.BR \- ,
+it reads standard input.
+.SH OPTIONS
+.TP
+.B \-v
+print version information to standard output, then exit.
+.SH EXIT STATUS
+.TP
+0
+Success.
+.TP
+1
+A usage error or an unreadable file.

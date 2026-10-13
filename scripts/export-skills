@@ -1,0 +1,55 @@
+#!/bin/sh
+# export-skills DEST [PLUGIN...] - copy plugin skills into DEST as portable
+# Agent Skills (e.g. DEST=.agents/skills for Codex and Copilot).
+# PLUGIN defaults to every directory under PLUGINS_DIR. PLUGINS_DIR defaults to
+# the plugins/ dir of this repo; when set, it is resolved relative to the cwd.
+# Exit: 0 ok, 1 duplicate skill name, 2 usage or path error.
+set -eu
+
+me=export-skills
+die() { code=$1; shift; echo "$me: $*" >&2; exit "$code"; }
+
+[ $# -ge 1 ] || die 2 'usage: export-skills DEST [PLUGIN...]'
+dest=$1
+shift
+plugins_dir=${PLUGINS_DIR:-$(dirname "$0")/../plugins}
+[ -d "$plugins_dir" ] || die 2 "no plugins dir $plugins_dir"
+
+if [ $# -eq 0 ]; then
+	for p in "$plugins_dir"/*/; do
+		[ -d "$p" ] && set -- "$@" "$(basename "$p")"
+	done
+fi
+for p in "$@"; do
+	[ -d "$plugins_dir/$p" ] || die 2 "unknown plugin $p"
+done
+
+parent=$(dirname "$dest")
+[ -d "$parent" ] || die 2 "missing directory $parent"
+[ ! -e "$dest" ] || [ -d "$dest" ] || die 2 "not a directory: $dest"
+
+names=
+for p in "$@"; do
+	for s in "$plugins_dir/$p"/skills/*/; do
+		[ -d "$s" ] && names="$names$(basename "$s")
+"
+	done
+done
+dup=$(printf '%s' "$names" | sort | uniq -d | sed -n 1p)
+[ -z "$dup" ] || die 1 "duplicate skill $dup"
+
+mkdir -p "$dest"
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+for p in "$@"; do
+	for s in "$plugins_dir/$p"/skills/*/; do
+		[ -d "$s" ] || continue
+		name=$(basename "$s")
+		rm -rf "${dest:?}/$name"
+		cp -R "${s%/}" "$dest/$name"
+		find "$dest/$name" -type f -name '*.md' | while IFS= read -r f; do
+			sed 's|[$]{CLAUDE_SKILL_DIR}/||g' "$f" > "$tmp"
+			cat "$tmp" > "$f"
+		done
+	done
+done

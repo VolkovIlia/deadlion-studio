@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""dl-contrast: report colour token pairs below their WCAG contrast minimum.
+
+Usage: dl-contrast [--hook] [PATH...]
+
+Only files containing the directive marker (MARK below) are parsed. A
+directive line starts with MARK, after optional indentation and a comment
+leader (// /* <!-- # ; * % -), followed by the foreground and background
+token names and an optional minimum ratio; MARK in the middle of a line, as
+in prose or messages, is ignored. Tokens are `NAME = "#rrggbb"`-style
+definitions in any language (Rust/C constants, CSS custom properties, sh
+variables, JSON keys); 3-digit hex is accepted and the last definition of a
+name wins. Prints `path:line: message` per violation on stdout. Exit 0
+clean, 1 violations, 2 usage or IO error. `--hook` reads Claude hook JSON on
+stdin, checks tool_input.file_path, prints violations on stderr, exits 2.
+"""
+
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+# Limits: config in source.
+#   name         default  meaning
+#   DEFAULT_MIN  4.5      minimum ratio when a directive names none (WCAG AA text)
+#   MAX_BYTES    1 MiB    larger files are skipped
+#   DL_HOOKS     1        env; 0 makes --hook exit 0 immediately
+DEFAULT_MIN = 4.5
+MAX_BYTES = 1 << 20
+
+MARK = "dl-contrast:"
+TOKEN_RE = re.compile(
+    r"(?P<name>--[\w-]+|[A-Za-z_]\w*)[\"']?\s*(?:\[\s*\])?\s*[:=][^#\n]*?"
+    r"#(?P<hex>[0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})\b")
+# The marker must open the line (after a comment leader) so prose and
+# diagnostics that mention the tool are not taken for directives.
+DIRECTIVE_RE = re.compile(
+    r"^\s*(?:(?://|/\*|<!--|[#;*%-]+)\s*)?" + re.escape(MARK)
+    + r"\s*(\S+)\s+(\S+)(?:\s+(\d+(?:\.\d+)?))?")
+
+
+def load_dl_size():
+    """Import the suckless-code dl-size script as a module."""
+    path = Path(__file__).resolve().parents[2] / "suckless-code" / "scripts" / "dl-size"
+    loader = importlib.machinery.SourceFileLoader("dl_size", str(path))
+    spec = importlib.util.spec_from_loader("dl_size", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+dl = load_dl_size()
+
+
+def read_text(path):
+    """Return PATH's text, or None when it is too large or binary."""
+    try:
+        if os.path.getsize(path) > MAX_BYTES:
+            return None
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError as err:
+        raise dl.UsageError(f"{path}: {err.strerror}")
+    if b"\0" in data[:1024]:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def collect(paths):
+    """Expand PATHS into the existing files they denote."""
+    files = []
+    for path in paths:
+        if os.path.isdir(path):
+            listed = dl.git_files(path)
+            listed = dl.walk_files(path) if listed is None else listed
+            files.extend(f for f in listed if os.path.isfile(f))
+        elif os.path.isfile(path):
+            files.append(path)
+        else:
+            raise dl.UsageError(f"{path}: no such file or directory")
+    return files
+
+
+def expand(hexdigits):
+    """Return (r, g, b) bytes for 3- or 6-digit HEXDIGITS."""
+    if len(hexdigits) == 3:
+        hexdigits = "".join(c * 2 for c in hexdigits)
+    return tuple(int(hexdigits[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def luminance(rgb):
+    """WCAG 2 relative luminance of an (r, g, b) byte triple."""
+    def channel(c):
+        c /= 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (channel(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def ratio(fg, bg):
+    """WCAG contrast ratio between two (r, g, b) colours."""
+    hi, lo = sorted((luminance(fg), luminance(bg)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def parse(text):
+    """Return ({token: rgb}, [(line, fg, bg, min)]) for TEXT."""
+    tokens, directives = {}, []
+    for n, line in enumerate(text.splitlines(), 1):
+        for match in TOKEN_RE.finditer(line):
+            tokens[match["name"]] = expand(match["hex"])
+        found = DIRECTIVE_RE.search(line)
+        if found:
+            minimum = float(found[3]) if found[3] else DEFAULT_MIN
+            directives.append((n, found[1], found[2], minimum))
+    return tokens, directives
+
+
+def check_file(path):
+    """Return [(path, line, message)] for one file."""
+    text = read_text(path)
+    if text is None or MARK not in text:
+        return []
+    tokens, directives = parse(text)
+    found = []
+    for n, fg, bg, minimum in directives:
+        unknown = [name for name in (fg, bg) if name not in tokens]
+        if unknown:
+            found.append((path, n, f"{path}:{n}: unknown token {unknown[0]}"))
+            continue
+        r = ratio(tokens[fg], tokens[bg])
+        if r < minimum:
+            found.append((path, n, f"{path}:{n}: contrast {fg}/{bg} is "
+                          f"{r:.2f}:1 (min {minimum:g})"))
+    return found
+
+
+def check(paths):
+    """Return the violation lines for PATHS, sorted by path then line."""
+    found = []
+    for path in collect(paths):
+        found.extend(check_file(path))
+    return [msg for _, _, msg in sorted(found)]
+
+
+def hook():
+    """Run in Claude hook mode; return the exit status."""
+    if os.environ.get("DL_HOOKS") == "0":
+        return 0
+    try:
+        path = json.load(sys.stdin)["tool_input"]["file_path"]
+    except (ValueError, KeyError, TypeError):
+        return 0
+    if not isinstance(path, str) or not os.path.isfile(path):
+        return 0
+    found = check([path])
+    for line in found:
+        print(line, file=sys.stderr)
+    return 2 if found else 0
+
+
+def usage():
+    print("dl-contrast: usage: dl-contrast [--hook] [PATH...]", file=sys.stderr)
+    return 2
+
+
+def main(argv):
+    args = argv[1:]
+    if args[:1] == ["--hook"]:
+        return hook() if len(args) == 1 else usage()
+    if any(a.startswith("-") for a in args):
+        return usage()
+    found = check(args or ["."])
+    for line in found:
+        print(line)
+    return 1 if found else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except dl.UsageError as err:
+        print(f"dl-contrast: {err}", file=sys.stderr)
+        sys.exit(2)

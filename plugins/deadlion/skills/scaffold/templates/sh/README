@@ -1,0 +1,31 @@
+__NAME__ - copy files to standard output
+
+__NAME__ writes each file operand, or standard input, to standard output.
+
+
+Requirements
+------------
+A POSIX sh and make.
+
+
+Installation
+------------
+__NAME__ is installed into the /usr/local namespace by default; override
+PREFIX on the make command line.
+
+Enter the following command to install __NAME__ (if necessary as root):
+
+    make clean install
+
+
+Running
+-------
+    __NAME__ [-v] [file...]
+
+See __NAME__(1).
+
+
+Configuration
+-------------
+The configuration of __NAME__ is the block of variables at the top of the
+script; customisations are kept as patches against it.

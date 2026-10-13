@@ -1,0 +1,4 @@
+/__NAME__
+*.o
+config.h
+__NAME__-*.tar.gz*

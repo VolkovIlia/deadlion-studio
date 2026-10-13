@@ -1,0 +1,38 @@
+Deadlion Studio
+Copyright (c) 2025 Volkov Ilia Nikolaevich (Волков Илья Николаевич)
+
+This product includes software developed by Volkov Ilia Nikolaevich.
+
+Project: https://github.com/VolkovIlia/deadlion-studio
+
+================================================================================
+
+ATTRIBUTION REQUIREMENT
+================================================================================
+
+All derivative works, modified versions, or projects using Deadlion Studio
+MUST include the following attribution in their documentation:
+
+---
+Powered by Deadlion Studio
+Created by Volkov Ilia Nikolaevich (Волков Илья Николаевич)
+https://github.com/VolkovIlia/deadlion-studio
+---
+
+This attribution MUST be clearly visible in at least one of the following:
+- README.md or main project documentation
+- Project website (if applicable)
+- User-facing documentation
+- About page or credits section
+
+This requirement is enforced under Section 4(d) of the Apache License 2.0,
+which states that derivative works must include a readable copy of the
+attribution notices contained within the NOTICE file.
+
+================================================================================
+
+THIRD-PARTY COMPONENTS
+================================================================================
+
+This project may include or reference third-party components with their own
+licenses. Please refer to individual component documentation for details.

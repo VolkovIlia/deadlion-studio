@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""dl-budget: report programs over their SLOC or direct-dependency budget.
+
+Usage: dl-budget [DIR...]
+
+Without DIR: every direct subdirectory of ./projects, or . when there is
+none. Prints `DIR:1: message` per violation on stdout. Exit 0 clean,
+1 violations, 2 usage or IO error. SLOC is approximate (non-blank lines
+not starting with a comment marker), like sloccount. Test code is not
+counted. DIR/.budget overrides the limits per project: `sloc N`, `deps N`.
+"""
+
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+# Limits: config in source, env override, DIR/.budget override per project.
+#   env var       default  meaning
+#   DL_MAX_SLOC   2000     max counted source lines per program
+#   DL_MAX_DEPS   5        max direct dependencies per program
+LIMITS = {"DL_MAX_SLOC": 2000, "DL_MAX_DEPS": 5}
+
+BUDGET_KEYS = {"sloc": "DL_MAX_SLOC", "deps": "DL_MAX_DEPS"}
+HASH_EXTS = frozenset(".py .sh .rb".split())
+
+
+def load_dl_size():
+    """Import the sibling dl-size script as a module."""
+    path = str(Path(__file__).resolve().with_name("dl-size"))
+    loader = importlib.machinery.SourceFileLoader("dl_size", path)
+    spec = importlib.util.spec_from_loader("dl_size", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    module.LIMITS.update(LIMITS)
+    return module
+
+
+dl = load_dl_size()
+
+
+def read_text(path):
+    """Return the text of PATH; IO errors become UsageError."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read().decode("utf-8", errors="replace")
+    except OSError as err:
+        raise dl.UsageError(f"{path}: {err.strerror}")
+
+
+def read_budget(directory):
+    """Return {env name: limit} for DIRECTORY, applying DIRECTORY/.budget."""
+    budget = {name: dl.limit(name) for name in LIMITS}
+    path = os.path.join(directory, ".budget")
+    if not os.path.isfile(path):
+        return budget
+    for n, line in enumerate(read_text(path).splitlines(), 1):
+        text = line.split("#", 1)[0].strip()
+        if not text:
+            continue
+        match = re.fullmatch(r"(sloc|deps)\s+(\d+)", text)
+        if match is None:
+            raise dl.UsageError(f"{path}:{n}: bad line")
+        budget[BUDGET_KEYS[match[1]]] = int(match[2])
+    return budget
+
+
+def is_test(directory, path):
+    """True when PATH below DIRECTORY is test code."""
+    parts = Path(os.path.relpath(path, directory)).parts
+    base = parts[-1]
+    if any(p in ("test", "tests") for p in parts[:-1]):
+        return True
+    return base.startswith("test") or "_test." in base
+
+
+def comment_markers(path):
+    """Return the line-comment prefixes for PATH's language."""
+    ext = os.path.splitext(path)[1].lower()
+    if not ext or ext in HASH_EXTS:
+        return ("#",)
+    if ext == ".lua":
+        return ("--",)
+    return ("//", "/*", "*")
+
+
+def count_sloc(path):
+    """Count non-blank lines of PATH that do not start a comment."""
+    markers = comment_markers(path)
+    count = 0
+    for line in read_text(path).splitlines():
+        text = line.strip()
+        if text and not text.startswith(markers):
+            count += 1
+    return count
+
+
+def project_sloc(directory):
+    """Return the SLOC of DIRECTORY's non-test source files."""
+    files = dl.collect([directory])
+    return sum(count_sloc(f) for f in files if not is_test(directory, f))
+
+
+def cargo_deps(text):
+    data = tomllib.loads(text)
+    tables = [data.get("dependencies", {}), data.get("build-dependencies", {})]
+    tables += [t.get("dependencies", {}) for t in data.get("target", {}).values()]
+    return {name for table in tables for name in table}
+
+
+def pyproject_deps(text):
+    specs = tomllib.loads(text).get("project", {}).get("dependencies", [])
+    return {re.split(r"[<>=!~;\[ ]", s, maxsplit=1)[0].strip() for s in specs}
+
+
+def package_deps(text):
+    return set(json.loads(text).get("dependencies", {}))
+
+
+def gomod_deps(text):
+    names, block = set(), False
+    for line in text.splitlines():
+        words, indirect = line.split(), "// indirect" in line
+        if block and words == [")"]:
+            block = False
+        elif block and words and not indirect:
+            names.add(words[0])
+        elif words[:2] == ["require", "("]:
+            block = True
+        elif words[:1] == ["require"] and len(words) > 1 and not indirect:
+            names.add(words[1])
+    return names
+
+
+def configmk_deps(text):
+    names = set()
+    for line in text.splitlines():
+        if line.startswith("LIBS"):
+            names |= {t[2:] for t in line.split() if t.startswith("-l")}
+    return names - {"c"}
+
+
+MANIFESTS = {
+    "Cargo.toml": cargo_deps,
+    "pyproject.toml": pyproject_deps,
+    "package.json": package_deps,
+    "go.mod": gomod_deps,
+    "config.mk": configmk_deps,
+}
+
+
+def project_deps(directory):
+    """Return the sorted direct dependency names declared in DIRECTORY."""
+    names = set()
+    for manifest, parse in MANIFESTS.items():
+        path = os.path.join(directory, manifest)
+        if not os.path.isfile(path):
+            continue
+        try:
+            names |= parse(read_text(path))
+        except (ValueError, AttributeError, TypeError) as err:
+            raise dl.UsageError(f"{path}: {err}")
+    return sorted(names)
+
+
+def check(directory):
+    """Return the budget violations for one project DIRECTORY."""
+    if not os.path.isdir(directory):
+        raise dl.UsageError(f"{directory}: no such directory")
+    budget = read_budget(directory)
+    found = []
+    sloc, max_sloc = project_sloc(directory), budget["DL_MAX_SLOC"]
+    if sloc > max_sloc:
+        found.append(f"{directory}:1: project has {sloc} SLOC (max {max_sloc})")
+    deps, max_deps = project_deps(directory), budget["DL_MAX_DEPS"]
+    if len(deps) > max_deps:
+        found.append(f"{directory}:1: project has {len(deps)} direct "
+                     f"dependencies (max {max_deps}): {', '.join(deps)}")
+    return found
+
+
+def default_dirs():
+    """Every direct subdirectory of ./projects, or . without one."""
+    if not os.path.isdir("projects"):
+        return ["."]
+    names = sorted(n for n in os.listdir("projects")
+                   if not n.startswith(".")
+                   and os.path.isdir(os.path.join("projects", n)))
+    return [os.path.join("projects", n) for n in names]
+
+
+def main(argv):
+    args = argv[1:]
+    if any(a.startswith("-") for a in args):
+        print("dl-budget: usage: dl-budget [DIR...]", file=sys.stderr)
+        return 2
+    found = []
+    for directory in args or default_dirs():
+        found.extend(check(directory))
+    for line in found:
+        print(line)
+    return 1 if found else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except dl.UsageError as err:
+        print(f"dl-budget: {err}", file=sys.stderr)
+        sys.exit(2)

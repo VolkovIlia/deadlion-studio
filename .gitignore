@@ -1,0 +1,92 @@
+# Local Claude Code state and per-machine config
+.claude/
+/.mcp.json
+
+# Working documents produced by the workflow skills
+.dev-docs/
+.dev-reports/
+
+# Plugin eval runs
+plugins/*/evals/results/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build and test output
+dist/
+/build/
+out/
+target/
+coverage/
+test-results/
+playwright-report/
+.cache/
+
+# Logs, backups, temp
+*.log
+.logs/
+*.bak
+*.backup
+*.old
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Media, binaries, archives, databases (dl-guard blocks these too)
+*.mp4
+*.webm
+*.avi
+*.mov
+*.mkv
+*.mp3
+*.wav
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+*.zip
+*.tar
+*.gz
+*.7z
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+secrets.json
+secrets.yaml
+credentials.json
+credentials.yaml

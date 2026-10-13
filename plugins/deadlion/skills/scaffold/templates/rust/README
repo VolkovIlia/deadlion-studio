@@ -1,0 +1,34 @@
+__NAME__ - copy files to standard output
+
+__NAME__ writes each file operand, or standard input, to standard output.
+
+
+Requirements
+------------
+A Rust toolchain (cargo) and a POSIX make. No crates beyond std.
+
+
+Installation
+------------
+__NAME__ is installed into the /usr/local namespace by default; override
+PREFIX on the make command line.
+
+Afterwards enter the following command to build and install __NAME__ (if
+necessary as root):
+
+    make clean install
+
+
+Running
+-------
+    __NAME__ [-v] [file...]
+
+See __NAME__(1).
+
+
+Configuration
+-------------
+The configuration of __NAME__ is done by editing src/config.rs and
+(re)compiling the source code. src/config.rs is copied from
+src/config.def.rs on the first build; customisations are kept as patches
+against src/config.def.rs.

@@ -1,0 +1,11 @@
+# Shell scripts should always use LF line endings
+*.sh text eol=lf
+scripts/*.sh text eol=lf
+
+# Development-only files stay out of `git archive` and GitHub's source zips;
+# the plugins themselves are installed by cloning, so this only trims downloads.
+/.github                  export-ignore
+/tests                    export-ignore
+/.pre-commit-config.yaml  export-ignore
+/.trufflehog-exclude.txt  export-ignore
+/requirements-dev.txt     export-ignore

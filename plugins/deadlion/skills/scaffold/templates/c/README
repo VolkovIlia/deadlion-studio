@@ -1,0 +1,33 @@
+__NAME__ - copy files to standard output
+
+__NAME__ writes each file operand, or standard input, to standard output.
+
+
+Requirements
+------------
+A C99 compiler and a POSIX make.
+
+
+Installation
+------------
+Edit config.mk to match your local setup (__NAME__ is installed into the
+/usr/local namespace by default).
+
+Afterwards enter the following command to build and install __NAME__ (if
+necessary as root):
+
+    make clean install
+
+
+Running
+-------
+    __NAME__ [-v] [file...]
+
+See __NAME__(1).
+
+
+Configuration
+-------------
+The configuration of __NAME__ is done by editing config.h and (re)compiling
+the source code. config.h is copied from config.def.h on the first build;
+customisations are kept as patches against config.def.h.

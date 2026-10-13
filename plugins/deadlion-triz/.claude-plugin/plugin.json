@@ -1,0 +1,11 @@
+{
+  "name": "deadlion-triz",
+  "version": "4.0.0",
+  "description": "TRIZ inventive problem solving for contradictions and trade-offs",
+  "author": {
+    "name": "Ilia Volkov",
+    "email": "ilia.volkov@outlook.com"
+  },
+  "repository": "https://github.com/VolkovIlia/deadlion-studio",
+  "license": "Apache-2.0"
+}
