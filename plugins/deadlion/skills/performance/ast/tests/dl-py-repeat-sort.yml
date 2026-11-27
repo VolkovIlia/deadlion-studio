@@ -1,5 +1,6 @@
 id: dl-py-repeat-sort
 valid:
   - "order = sorted(keys)\nfor row in rows:\n use(order, row)"
+  - "for values in batches:\n use(sorted(values))"
 invalid:
   - "for row in rows:\n use(sorted(keys), row)"

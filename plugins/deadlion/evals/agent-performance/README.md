@@ -16,3 +16,18 @@ For each reviewed sample, run `python3 -I grade.py samples/A` from this director
 There was one generation trial per arm, with seven tasks batched in the second session. Timing batches were collected sequentially on one shared host. Instruction text differed by treatment, and tool access was read-only. The results establish feasibility; they do not establish an agent-quality improvement. Provider totals include cached inputs on repeated turns. Allocation event counts, energy, longitudinal repair rates and exact end-to-end generation latency were not collected.
 
 For the seven-function session, event-file creation to final write took approximately 35 s (A), 88 s (B), 121 s (C) and 144 s (D). These are local elapsed-time estimates at one-second resolution.
+
+## Repeat on the release implementation
+
+Each arm used one new read-only Codex session, the same model, the same eight functions and a 300-second deadline. B received the original skills. C and D received release implementation skills. D could compare at most two candidates. We graded the resulting modules inside separate network-isolated Bubblewrap processes. Each grades.json retains all nine timings per case and the separate traced peak. The repeat uses different batching from the pilot.
+
+| Arm | Passed | Input tokens | Cached input | Output tokens | Commands | Elapsed seconds |
+|---|---:|---:|---:|---:|---:|---:|
+| A | 8/8 | 17796 | 13824 | 3036 | 0 | 67 |
+| B | 8/8 | 157773 | 144768 | 4450 | 13 | 101 |
+| C | 8/8 | 129767 | 110336 | 4470 | 13 | 101 |
+| D | 8/8 | 258221 | 237184 | 7045 | 17 | 160 |
+
+Within this repeat, the extra tools consumed more tokens and generation time with the same functional pass count. Compare timing distributions per task in repeat/A through repeat/D. The design has insufficient independent generations to rank the arms on code quality or speed.
+
+With Memray 1.21.0 in a disposable Python 3.13 environment, run `python -I profile_repeat.py` for allocation-event counts and allocated bytes including each grader fixture, AST branch-site counts, and membership scaling from 16 to 65,536 keys. The release capture is repeat/profiles.json. Allocation tracing and wall timing are separate runs. Repair counts and the number of unjustified optimizations were not independently labelled.

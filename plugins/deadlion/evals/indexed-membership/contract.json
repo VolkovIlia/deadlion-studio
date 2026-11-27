@@ -14,7 +14,7 @@
   "oracle": "For range(n) probing range(n), the exact result is n",
   "workload": "input",
   "build": "Same CPython interpreter for both commands",
-  "budget": {"wall_time_regression_fraction": 0.05, "max_wall_ratio": 0.7},
+  "budget": {"wall_time_regression_fraction": 0.05, "max_wall_ratio": 0.7, "peak_rss_kib": 98304},
   "benchmark": {"baseline":["python3","scan.py"], "candidate":["python3","indexed.py"], "expected":"expected"},
   "verify": "Run dl-perf with scan.py, indexed.py, input and expected"
 }

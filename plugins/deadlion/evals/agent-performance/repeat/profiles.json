@@ -1,0 +1,174 @@
+{
+  "A": {
+    "allocations": {
+      "solve": {
+        "events": 9936,
+        "bytes": 3172964
+      },
+      "stable_sum": {
+        "events": 150019,
+        "bytes": 13057844
+      },
+      "distances": {
+        "events": 104050,
+        "bytes": 7215847
+      },
+      "parse_rows": {
+        "events": 22,
+        "bytes": 18031
+      },
+      "parallel_map": {
+        "events": 4077,
+        "bytes": 460419
+      },
+      "count_bytes": {
+        "events": 1792,
+        "bytes": 671395
+      },
+      "read_frame": {
+        "events": 156,
+        "bytes": 15605
+      },
+      "totals": {
+        "events": 409,
+        "bytes": 235535
+      }
+    },
+    "membership_median_ns": {
+      "16": 1291,
+      "256": 8766,
+      "4096": 114846,
+      "65536": 2035474
+    },
+    "branch_sites": 17
+  },
+  "B": {
+    "allocations": {
+      "solve": {
+        "events": 9846,
+        "bytes": 3163436
+      },
+      "stable_sum": {
+        "events": 11,
+        "bytes": 144952
+      },
+      "distances": {
+        "events": 102123,
+        "bytes": 7107964
+      },
+      "parse_rows": {
+        "events": 21,
+        "bytes": 17967
+      },
+      "parallel_map": {
+        "events": 3995,
+        "bytes": 446767
+      },
+      "count_bytes": {
+        "events": 1790,
+        "bytes": 671267
+      },
+      "read_frame": {
+        "events": 142,
+        "bytes": 14221
+      },
+      "totals": {
+        "events": 405,
+        "bytes": 235309
+      }
+    },
+    "membership_median_ns": {
+      "16": 1167,
+      "256": 8700,
+      "4096": 116050,
+      "65536": 1946070
+    },
+    "branch_sites": 16
+  },
+  "C": {
+    "allocations": {
+      "solve": {
+        "events": 9846,
+        "bytes": 3163436
+      },
+      "stable_sum": {
+        "events": 11,
+        "bytes": 144952
+      },
+      "distances": {
+        "events": 102125,
+        "bytes": 7108060
+      },
+      "parse_rows": {
+        "events": 21,
+        "bytes": 17967
+      },
+      "parallel_map": {
+        "events": 4013,
+        "bytes": 447463
+      },
+      "count_bytes": {
+        "events": 1790,
+        "bytes": 671267
+      },
+      "read_frame": {
+        "events": 148,
+        "bytes": 14333
+      },
+      "totals": {
+        "events": 405,
+        "bytes": 235309
+      }
+    },
+    "membership_median_ns": {
+      "16": 1191,
+      "256": 8682,
+      "4096": 112639,
+      "65536": 1963237
+    },
+    "branch_sites": 16
+  },
+  "D": {
+    "allocations": {
+      "solve": {
+        "events": 49850,
+        "bytes": 6043660
+      },
+      "stable_sum": {
+        "events": 11,
+        "bytes": 144952
+      },
+      "distances": {
+        "events": 102128,
+        "bytes": 7108244
+      },
+      "parse_rows": {
+        "events": 21,
+        "bytes": 17967
+      },
+      "parallel_map": {
+        "events": 4013,
+        "bytes": 446999
+      },
+      "count_bytes": {
+        "events": 1790,
+        "bytes": 671267
+      },
+      "read_frame": {
+        "events": 148,
+        "bytes": 14125
+      },
+      "totals": {
+        "events": 405,
+        "bytes": 235309
+      }
+    },
+    "membership_median_ns": {
+      "16": 1308,
+      "256": 9245,
+      "4096": 122534,
+      "65536": 2174079
+    },
+    "branch_sites": 16
+  }
+}

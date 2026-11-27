@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## 4.3.0 - 2026-11-28
+
+- The core plugin runs executable time and resource contracts, structural performance diagnostics and isolated OMP experiments.
+- Pull requests exercise current and previously approved workload contracts. The CLI records raw timings, executable hashes, profiler evidence and inconclusive results.
+- The repository includes audited upstream revisions, paired fixtures, a labelled warning corpus and a controlled coding-agent evaluation.
+
 ## [4.2.0] - 2026-10-13
 
 First public release. Earlier versions were developed privately.

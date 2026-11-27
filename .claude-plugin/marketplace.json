@@ -4,13 +4,13 @@
     "name": "Ilia Volkov",
     "email": "ilia.volkov@outlook.com"
   },
-  "description": "Suckless/Unix engineering, product discovery and UI/UX workflow for Claude Code",
+  "description": "Unix design, algorithm engineering, performance verification and product development skills",
   "plugins": [
     {
       "name": "deadlion",
       "source": "./plugins/deadlion",
-      "description": "Core: suckless/Unix engineering, product discovery and UI/UX workflow skills, hooks and agents",
-      "version": "4.2.0"
+      "description": "Core engineering workflow with algorithm contracts, performance checks, hooks and agents",
+      "version": "4.3.0"
     },
     {
       "name": "deadlion-triz",

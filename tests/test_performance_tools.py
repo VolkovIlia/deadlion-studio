@@ -173,3 +173,37 @@ def test_contract_gate_checks_current_candidate(tmp_path):
     code, report = run_tool("dl-perf-gate", contract)
     assert code == 2 and report["status"] == "NOT VERIFIED"
     assert "stdout" in report["reason"]
+
+
+def test_gate_retains_approved_oracle_across_checkouts(tmp_path):
+    source = TOOLS.parents[2] / "evals/indexed-membership"
+    base = tmp_path / "approved"
+    candidate = tmp_path / "candidate"
+    base.mkdir()
+    candidate.mkdir()
+    for path in ("contract.json", "input", "expected", "scan.py"):
+        (base / path).write_bytes((source / path).read_bytes())
+    (candidate / "indexed.py").write_text('print("weakened")')
+    (candidate / "expected").write_text("weakened\n")
+    code, report = run_tool("dl-perf-gate", base / "contract.json", "--candidate-dir", candidate)
+    assert code == 2 and "stdout" in report["reason"]
+
+
+def test_required_provider_cap_stops_before_clone(tmp_path):
+    workspace = tmp_path / "experiment"
+    launcher = TOOLS.parents[2] / "omp/dl-evolve"
+    result = subprocess.run([launcher, workspace, "--require-hard-token-cap"], capture_output=True)
+    assert result.returncode and b"NOT VERIFIED" in result.stderr
+    assert not workspace.exists()
+
+
+def test_load_checks_every_response(tmp_path):
+    expected = tmp_path / "fixture"
+    expected.write_text("verified\n")
+    flags = ("load", "--requests", "100", "--workers", "3", "--input", expected, "--expected", expected, "--")
+    code, result = run_tool("dl-perf", *flags, "cat")
+    assert code == 0 and result["requests"] == len(result["raw_latency_ns"]) == 100
+    latency = result["latency_ns"]
+    assert 0 < latency["p50"] <= latency["p95"] <= latency["p99"]
+    code, result = run_tool("dl-perf", *flags, "echo", "incorrect")
+    assert code != 0 and result["status"] == "NOT VERIFIED"

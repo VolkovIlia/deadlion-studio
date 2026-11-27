@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/VolkovIlia/deadlion-studio)](https://github.com/VolkovIlia/deadlion-studio/releases)
 [![License: Apache-2.0](https://img.shields.io/github/license/VolkovIlia/deadlion-studio)](LICENSE)
 
-Claude Code plugins for building software the suckless way. Programs stay small,
+Engineering skills for OMP, Claude Code and Codex. Programs stay small,
 they talk in plain text, and nothing counts as done without proof. The core plugin
 `deadlion` takes Claude from idea to release with sixteen skills, three subagents,
 three hooks and six small Unix tools.

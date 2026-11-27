@@ -1,8 +1,8 @@
 {
   "name": "deadlion",
   "displayName": "Deadlion Studio",
-  "version": "4.2.0",
-  "description": "Suckless/Unix engineering, product discovery and UI/UX workflow for Claude Code",
+  "version": "4.3.0",
+  "description": "Unix design, algorithm engineering, performance verification and product development skills",
   "author": {
     "name": "Ilia Volkov",
     "email": "ilia.volkov@outlook.com"

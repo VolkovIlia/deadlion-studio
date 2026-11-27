@@ -1,0 +1,3 @@
+# Static warning evaluation
+
+Ten Python issue sites were labelled for avoidable work using the advertised type and ownership contracts. Run score.py with ast-grep 0.51.3 on PATH. The scorer counts annotated lines once, independently of warning severity. The initial rules were frozen before scoring (before.json). After inspecting misses and false alarms, the Python rules added comprehension coverage and suppressed per-item sort and serialization. The second score on the same cases is a tuning result (after.json). The remaining two false alarms are indexed set lookup and a required retained snapshot. This corpus is too small to estimate field precision.

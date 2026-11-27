@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -33,6 +35,22 @@ jobs:
           gate=plugins/deadlion/skills/performance/scripts/dl-perf-gate
           for contract in plugins/deadlion/evals/indexed-membership/contract.json .performance/**/contract.json; do
             "$gate" "$contract" | tee -a "$RUNNER_TEMP/performance.jsonl"
+          done
+      - name: Check candidate against previously approved contracts
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          base=$(mktemp -d)
+          git archive "$BASE_SHA" | tar -x -C "$base"
+          gate="$PWD/plugins/deadlion/skills/performance/scripts/dl-perf-gate"
+          for contract in "$base"/.performance/**/contract.json "$base"/plugins/deadlion/evals/indexed-membership/contract.json; do
+            [[ -f "$contract" ]] || continue
+            path=${contract#"$base"/}
+            "$gate" "$contract" --candidate-dir "$PWD/$(dirname "$path")"
           done
       - name: Performance diagnostics
         run: plugins/deadlion/skills/performance/scripts/dl-analyze --all --deep --json

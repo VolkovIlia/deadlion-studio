@@ -63,12 +63,16 @@ def main():
     parser.add_argument("--iterations", type=int, default=4)
     parser.add_argument("--seconds", type=int, default=300)
     parser.add_argument("--tokens", type=int, default=0, help="stop at reported foreground token usage (0 disables)")
+    parser.add_argument("--require-hard-token-cap", action="store_true",
+                        help="refuse launch unless provider-level token enforcement is available")
     parser.add_argument("--patience", type=int, default=3, help="stop after consecutive discarded runs")
     parser.add_argument("--memory-mib", type=int, default=2048)
     parser.add_argument("--cpu-percent", type=int, default=100)
     parser.add_argument("--pause-after", type=int, default=0, help="pause after this many logged attempts")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+    if args.require_hard_token_cap:
+        raise ValueError("this OMP transport cannot enforce a provider-level hard token cap")
     if args.pause_after < 0:
         parser.error("pause-after must be nonnegative")
     directory = args.workspace.resolve()

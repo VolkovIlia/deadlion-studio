@@ -1,0 +1,141 @@
+{
+  "parameters": {
+    "baseline": "python3 scan.py",
+    "candidate": "python3 indexed.py",
+    "input": "input",
+    "expected": "expected",
+    "build": "Same CPython interpreter for both commands",
+    "candidate_dir": ".",
+    "runs": 16,
+    "warmups": 1,
+    "timeout": 30,
+    "tolerance": 0.05
+  },
+  "revision": "bfaee9e4f39f19b30c61814145c2ce86a434014e",
+  "cpu_model": "12th Gen Intel(R) Core(TM) i7-12700K",
+  "platform": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+  "machine": "x86_64",
+  "python": "3.14.8 (main, Oct  1 2026, 00:00:00) [GCC 16.2.1 20260819 (Red Hat 16.2.1-2)]",
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+  "expected_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+  "wall_ns": [
+    [
+      76083143,
+      20202292
+    ],
+    [
+      73657513,
+      19412714
+    ],
+    [
+      73154265,
+      19420765
+    ],
+    [
+      73316540,
+      18971410
+    ],
+    [
+      74907580,
+      19164651
+    ],
+    [
+      74475155,
+      19967881
+    ],
+    [
+      75232485,
+      20153681
+    ],
+    [
+      76722847,
+      21382229
+    ],
+    [
+      75978594,
+      18873108
+    ],
+    [
+      74942434,
+      18972613
+    ],
+    [
+      73758684,
+      19171938
+    ],
+    [
+      73536673,
+      19053368
+    ],
+    [
+      74058709,
+      19698490
+    ],
+    [
+      74399590,
+      19977096
+    ],
+    [
+      74714753,
+      21319185
+    ],
+    [
+      76453328,
+      22436074
+    ]
+  ],
+  "command_inputs": {
+    "/usr/bin/python3.14": "df5a95e6119c051c43ab78993af48f8a53c54a25a475dacd1428c322251eb8b0",
+    "/home/volk/vibeprojects/deadlion-studio/plugins/deadlion/evals/indexed-membership/scan.py": "b4b90663f71654bcd3313d93f2147e56c70c1791c3770f2043d86521a263116b",
+    "/home/volk/vibeprojects/deadlion-studio/plugins/deadlion/evals/indexed-membership/indexed.py": "d55a917720a8d277e5dea7b5c085b10406c44f43cf9d250a22dd5565cc7f6b29"
+  },
+  "status": "VERIFIED",
+  "median_ratio": 0.26550300604738925,
+  "interval": [
+    0.2587603015636035,
+    0.2685108345355129
+  ],
+  "resources": {
+    "status": "MEASURED",
+    "platform": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "command": [
+      "python3",
+      "indexed.py"
+    ],
+    "metrics": {
+      "user_cpu_s": 0.01,
+      "system_cpu_s": 0.0,
+      "peak_rss_kib": 13264.0,
+      "involuntary_switches": 3.0,
+      "voluntary_switches": 1.0
+    },
+    "budgets": {
+      "peak_rss_kib": 98304.0
+    },
+    "exceeded": []
+  },
+  "contract": "plugins/deadlion/evals/indexed-membership/contract.json",
+  "max_wall_ratio": 0.7
+}

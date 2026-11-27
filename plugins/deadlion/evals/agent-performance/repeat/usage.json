@@ -1,0 +1,46 @@
+[
+  {
+    "arm": "A",
+    "input_tokens": 17796,
+    "cached_input_tokens": 13824,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 3036,
+    "reasoning_output_tokens": 2438,
+    "tool_commands": 0,
+    "elapsed_seconds": 67,
+    "passed": 8
+  },
+  {
+    "arm": "B",
+    "input_tokens": 157773,
+    "cached_input_tokens": 144768,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 4450,
+    "reasoning_output_tokens": 1442,
+    "tool_commands": 13,
+    "elapsed_seconds": 101,
+    "passed": 8
+  },
+  {
+    "arm": "C",
+    "input_tokens": 129767,
+    "cached_input_tokens": 110336,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 4470,
+    "reasoning_output_tokens": 1688,
+    "tool_commands": 13,
+    "elapsed_seconds": 101,
+    "passed": 8
+  },
+  {
+    "arm": "D",
+    "input_tokens": 258221,
+    "cached_input_tokens": 237184,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 7045,
+    "reasoning_output_tokens": 2476,
+    "tool_commands": 17,
+    "elapsed_seconds": 160,
+    "passed": 8
+  }
+]

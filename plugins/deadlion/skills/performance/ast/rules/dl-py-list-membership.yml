@@ -5,5 +5,7 @@ message: "Check the container type and number of probes. Linear membership acros
 rule:
   pattern: "$X in $Y"
   inside:
-    kind: for_statement
+    any:
+      - kind: for_statement
+      - kind: list_comprehension
     stopBy: end

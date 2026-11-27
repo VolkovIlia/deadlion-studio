@@ -19,10 +19,10 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def measure(command, workload, expected, timeout):
+def measure(command, workload, expected, timeout, cwd=None):
     start = time.perf_counter_ns()
     result = subprocess.run(command, input=workload, stdout=subprocess.PIPE,
-                            check=True, timeout=timeout)
+                            check=True, timeout=timeout, cwd=cwd)
     elapsed = time.perf_counter_ns() - start
     if digest(result.stdout) != expected:
         raise ValueError("stdout differs from the trusted expected output")
@@ -47,14 +47,15 @@ def compare(pairs, tolerance):
     return dict(status=status, median_ratio=statistics.median(ratios), interval=[low, high])
 
 
-def command_inputs(commands):
+def command_inputs(commands, directories):
     hashes = {}
-    for command in commands:
-        executable = shutil.which(command[0])
+    for command, directory in zip(commands, directories):
+        binary = directory / command[0] if "/" in command[0] else command[0]
+        executable = shutil.which(binary)
         if executable is None:
             raise ValueError(f"missing executable: {command[0]}")
         for argument in (executable, *command[1:]):
-            path = Path(argument)
+            path = directory / argument
             if path.is_file() and str(path.resolve()) not in hashes:
                 with path.open("rb") as stream:
                     hashes[str(path.resolve())] = hashlib.file_digest(stream, "sha256").hexdigest()
@@ -74,6 +75,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("baseline", "candidate", "input", "expected", "build"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--candidate-dir", default=".")
     parser.add_argument("--runs", type=int, default=16)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=30)
@@ -87,18 +89,19 @@ def main():
     commands = [shlex.split(args.baseline), shlex.split(args.candidate)]
     if not all(commands):
         parser.error("empty command")
+    directories = [Path.cwd(), Path(args.candidate_dir).resolve()]
     pairs = []
     report = dict(parameters=vars(args), **environment(),
                   input_sha256=digest(workload), expected_sha256=expected, wall_ns=pairs)
     try:
-        report["command_inputs"] = command_inputs(commands)
+        report["command_inputs"] = command_inputs(commands, directories)
         for i in range(-args.warmups, args.runs):
             pair = [0, 0]
             for index in (i % 2, 1 - i % 2):
-                pair[index] = measure(commands[index], workload, expected, args.timeout)
+                pair[index] = measure(commands[index], workload, expected, args.timeout, directories[index])
             if i >= 0:
                 pairs.append(pair)
-        if report["command_inputs"] != command_inputs(commands):
+        if report["command_inputs"] != command_inputs(commands, directories):
             raise ValueError("command inputs changed during measurement")
         report.update(compare(pairs, args.tolerance))
     except (ValueError, OSError, subprocess.SubprocessError) as error:
@@ -133,7 +136,10 @@ def frontier(path):
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:2] == ["load"]:
+            from load_measurement import run
+            sys.exit(run(sys.argv[2:]))
         sys.exit(frontier(sys.argv[2]) if len(sys.argv) == 3 and sys.argv[1] == "frontier" else main())
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as error:
         print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
         sys.exit(2)
