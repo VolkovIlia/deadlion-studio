@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Validate the evidence fields of a performance-sensitive plan."""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def validate(record):
+    common = ("problem", "input_dimensions", "scale", "distribution", "constraints",
+              "invariant", "oracle", "choice", "workload", "build", "verify")
+    if not isinstance(record, dict):
+        raise ValueError("expected a JSON object")
+    if record.get("mode") not in ("Performance", "Research", "Evolution"):
+        raise ValueError("select Performance, Research or Evolution")
+    required = list(common)
+    if record["mode"] == "Research":
+        required.extend(("computational_model", "lower_bound"))
+    missing = [key for key in required if not isinstance(record.get(key), str) or not record[key].strip()]
+    if missing:
+        raise ValueError("missing text fields: " + ", ".join(missing))
+    alternatives = record.get("alternatives")
+    if not isinstance(alternatives, list) or len(alternatives) < 2:
+        raise ValueError("describe at least two alternatives")
+    fields = ("algorithm", "time", "space", "assumptions")
+    for alternative in alternatives:
+        if not isinstance(alternative, dict) or any(
+                not isinstance(alternative.get(k), str) or not alternative[k].strip() for k in fields):
+            raise ValueError("each alternative needs algorithm, time, space and assumptions")
+    if len({a["algorithm"].strip() for a in alternatives}) < 2:
+        raise ValueError("alternatives must be distinct")
+    if record["choice"] not in {a["algorithm"] for a in alternatives}:
+        raise ValueError("choice must identify an alternative")
+    budget = record.get("budget")
+    if not isinstance(budget, dict) or not budget or any(
+            type(v) not in (float, int) or not 0 <= v < float("inf") for v in budget.values()):
+        raise ValueError("supply finite nonnegative resource budgets with units in their keys")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("contract", type=Path)
+    args = parser.parse_args()
+    try:
+        validate(json.loads(args.contract.read_text()))
+    except (OSError, ValueError) as error:
+        print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
+        sys.exit(2)
+    print(json.dumps(dict(status="CHECKED", scope="contract structure")))

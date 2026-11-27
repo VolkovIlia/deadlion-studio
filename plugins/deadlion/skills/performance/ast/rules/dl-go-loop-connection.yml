@@ -1,0 +1,11 @@
+id: dl-go-loop-connection
+language: Go
+severity: warning
+message: "Repeated pool creation can defeat connection reuse. Confirm driver, lifetime and isolation requirements."
+rule:
+  pattern:
+    context: "package p\nfunc f(){ sql.Open($$$ARGS) }"
+    selector: call_expression
+  inside:
+    kind: for_statement
+    stopBy: end

@@ -1,0 +1,11 @@
+id: dl-c-loop-allocation
+language: C
+severity: warning
+message: "Count allocations and check whether lifetimes overlap before considering storage reuse."
+rule:
+  pattern:
+    context: "void f(){ malloc($N); }"
+    selector: call_expression
+  inside:
+    kind: for_statement
+    stopBy: end

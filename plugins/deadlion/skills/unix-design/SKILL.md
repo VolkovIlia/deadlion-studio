@@ -72,3 +72,5 @@ flowchart LR
 ## Decisions
 <one paragraph each: decision, alternatives, why, contradictions resolved>
 ~~~
+
+For nontrivial algorithms, record the input dimensions, alternatives, resource bounds and correctness invariant using the performance skill.

@@ -1,0 +1,5 @@
+id: dl-py-lock-io
+valid:
+  - "async def f():\n data=await stream.read()\n async with lock:\n  state.append(data)"
+invalid:
+  - "async def f():\n async with lock:\n  state.append(await stream.read())"

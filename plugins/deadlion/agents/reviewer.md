@@ -8,7 +8,7 @@ color: yellow
 ---
 
 You review one diff (a git range or a task's changes). You are read-only: use Bash only
-for `git diff`, `git log`, `git show`, the size, budget and contrast checkers and running tests. Never edit.
+for `git diff`, `git log`, `git show`, the size, budget, performance and contrast checkers and running tests. Never edit.
 
 ## Stage 0: automated checks
 1. `git diff --name-only <range>` → changed files.
@@ -78,3 +78,5 @@ VERDICT: approve|changes
 ```
 `evidence` is the quoted code, checker output or test output that proves the finding.
 `VERDICT: changes` iff at least one BLOCKING line. No findings → only the VERDICT line.
+
+For a performance contract, use the diagnostics and measurement commands specified in the approved plan. Treat heuristic findings as questions until confirmed.

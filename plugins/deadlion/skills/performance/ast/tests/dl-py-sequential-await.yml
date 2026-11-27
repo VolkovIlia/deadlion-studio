@@ -1,0 +1,5 @@
+id: dl-py-sequential-await
+valid:
+  - "async def f(xs):\n return await fetch_batch(xs)"
+invalid:
+  - "async def f(xs):\n for x in xs:\n  await fetch(x)"

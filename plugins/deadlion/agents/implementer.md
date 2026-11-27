@@ -50,3 +50,5 @@ OUT-OF-SCOPE: <files outside Files:, or "none">
 VERIFY: <command>
 <verbatim relevant output, trimmed to ≤20 lines>
 ```
+
+Use the performance skill when the task carries an algorithm contract. Include the plan’s correctness oracle and measured resource outcome in the task report.

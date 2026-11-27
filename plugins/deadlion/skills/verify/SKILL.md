@@ -51,3 +51,5 @@ failure. When something cannot be verified, downgrade the claim; never round it 
 | program done | `make -C <dir> test` and `dl-budget <dir>` exit 0 | unit tests alone |
 | contract honoured | producer output matches the contract example; consumer fixture test passes | reading the code |
 | UI works | ui-verify PASS this turn: dl-tui blocks at 80×24 and 40×12 (terminal) or Playwright screenshots at 375/768/1280 (web), and dl-contrast exit 0 | "looks right", a description without a capture |
+
+Run the performance skill’s applicable checks. Record PERFORMANCE REGRESSION and INCONCLUSIVE explicitly. Missing required measurements are NOT VERIFIED.

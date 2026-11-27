@@ -19,6 +19,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: pytest
         run: pip install -r requirements-dev.txt && pytest tests -q
+      - name: Structural performance rule corpus
+        run: |
+          npm install --global @ast-grep/cli@0.51.3
+          ast-grep test --skip-snapshot-tests -c plugins/deadlion/skills/performance/ast/sgconfig.yml
+      - name: OMP event adapter contracts
+        run: node tests/test_performance_omp.mjs
+      - name: Verify performance contracts on this checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          gate=plugins/deadlion/skills/performance/scripts/dl-perf-gate
+          for contract in plugins/deadlion/evals/indexed-membership/contract.json .performance/**/contract.json; do
+            "$gate" "$contract" | tee -a "$RUNNER_TEMP/performance.jsonl"
+          done
+      - name: Performance diagnostics
+        run: plugins/deadlion/skills/performance/scripts/dl-analyze --all --deep --json
       - name: export-skills
         run: sh tests/test_export_skills.sh
       # The npm package ships the real binary as a per-platform optional

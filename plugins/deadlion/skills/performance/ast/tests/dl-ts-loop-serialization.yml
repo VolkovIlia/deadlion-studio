@@ -1,0 +1,5 @@
+id: dl-ts-loop-serialization
+valid:
+  - "const s = JSON.stringify(config); for (const x of xs) { use(x, s); }"
+invalid:
+  - "for (const x of xs) { use(x, JSON.stringify(config)); }"

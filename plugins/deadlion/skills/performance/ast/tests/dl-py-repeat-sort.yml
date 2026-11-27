@@ -1,0 +1,5 @@
+id: dl-py-repeat-sort
+valid:
+  - "order = sorted(keys)\nfor row in rows:\n use(order, row)"
+invalid:
+  - "for row in rows:\n use(sorted(keys), row)"

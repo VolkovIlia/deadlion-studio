@@ -152,3 +152,9 @@ problems to [`SECURITY.md`](SECURITY.md). Changes are listed in
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+### Performance engineering
+
+The portable [performance skill](plugins/deadlion/skills/performance/SKILL.md) includes a contract validator, Ruff and ast-grep diagnostic adapters, Linux resource profiling and a paired-command benchmark with a trusted stdout fixture. Install Ruff 0.15.4 for Python and ast-grep 0.51.3 for the structural rules. On Fedora, GNU time supplies resource metrics and perf supplies optional PMU counters. The benchmark uses Python 3.11+ and its standard library. See the [command reference](plugins/deadlion/skills/performance/references/commands.md) for OMP installation, startup and measurement examples. The [audit](docs/performance-audit.md) records upstream revisions and legacy capabilities.
+
+CI executes every tracked `.performance/**/contract.json` and the indexed-membership control on the current checkout. Run `plugins/deadlion/skills/performance/scripts/dl-perf-gate PATH/contract.json` locally to reproduce the gate. A missing oracle, an unsupported budget, a regression or an inconclusive comparison fails the job. See the [worked contract](plugins/deadlion/evals/indexed-membership/contract.json).

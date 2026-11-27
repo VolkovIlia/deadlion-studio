@@ -1,0 +1,16 @@
+# Investigation by observed cost
+
+| Observation | Evidence to collect | Alternatives and exclusions |
+|---|---|---|
+| Repeated lookup, scan or sort | Count probes, updates, key comparisons and output elements at several sizes. Include index construction. | Reuse a sorted view, index, batch or stream. A Cartesian product can require quadratic output. |
+| Recursion or repeated invariant work | Write the recurrence, count unique states and identify the base case. Compare to a small reference solver. | Memoization needs a capacity, key identity and invalidation policy. Data-dependent calls may have side effects. |
+| Allocation or copying hotspot | Measure allocated bytes, frequency, lifetime, heap high-water mark, stack depth and RSS separately. Identify the owning call stack. | Compare reserve/reuse, views or a contiguous representation. Views can retain a large owner. Stack growth, fragmentation and GC pauses need separate evidence. |
+| Cache and bandwidth | Fix CPU placement, report line size and data layout, examine cycles, instructions, cache events and throughput. Measure data sets spanning cache sizes. | Compare AoS/SoA and compact layouts. Padding may improve independent concurrent updates while increasing the working set. |
+| CPU throughput | Sample first, inspect compiler vectorization feedback and hot instructions, compare IPC and branch misses in context. | SIMD, unrolling and removal of branches can increase setup or instruction-cache cost. Preserve floating-point tolerances and portability. |
+| Locking or atomics | Count contention, blocking time, context switches and owners. Distinguish true sharing from adjacent independent counters. | Batch, shard or shorten a critical section if the ordering contract allows it. Compare with a predictable uncontended lock. |
+| File, database or network I/O | Count queries, round trips, opens, bytes per call and queue depth. Measure p95/p99 from raw per-request observations at fixed load. | Batch, buffer and bound concurrent work. Test cancellation, ordering and backpressure. |
+| Growing queue or cache | Track cardinality against workload duration, retention after drain, RSS slope and peak. | Supply an eviction policy and test admission, invalidation and maximum size. |
+| Complex control flow | Review Ruff C901, SIM102 and SIM114 on a deep Python scan, alongside structural size limits. | Inspect critical paths independently. Fast predictable branches can be appropriate. |
+| Hardware or numerical specialization | State target ISA, CPU model, operands, accuracy contract and reference precision. Run differential cases including cancellation and boundary values. | Keep portable behavior unless a measured specialized path justifies its code and maintenance cost. |
+
+Start with the toolchain already present. For Rust use compiler-informed Clippy findings and a release benchmark; for C/C++ use compile_commands.json with clang-tidy and a separate sanitizer build for correctness. For Python use Ruff and a dedicated allocation run with Memray when available. JVM allocation, GC and JIT warmup need a JVM profiler. For Go use testing.B and pprof, and for JS/TS record the runtime and JIT warmup. Cross-language AST rules ship their match and exclusion examples under ast/tests.

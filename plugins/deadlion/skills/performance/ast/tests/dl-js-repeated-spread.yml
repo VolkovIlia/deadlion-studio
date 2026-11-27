@@ -1,0 +1,5 @@
+id: dl-js-repeated-spread
+valid:
+  - "for (const x of xs) { a.push(x); }"
+invalid:
+  - "for (const x of xs) { a = [...a, x]; }"

@@ -1,0 +1,9 @@
+id: dl-py-lock-io
+language: Python
+severity: warning
+message: Check whether the async context is a shared lock. Holding it during network reads can serialize unrelated tasks. Preserve protocol ordering before shortening the critical section.
+rule:
+  pattern: await $STREAM.read($$$ARGS)
+  inside:
+    kind: with_statement
+    stopBy: end

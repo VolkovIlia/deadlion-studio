@@ -1,0 +1,9 @@
+id: dl-py-sql-loop
+language: Python
+severity: warning
+message: "Count statements using a database trace. A query per row can impose q round trips. Ordered side effects or small batches can require this pattern."
+rule:
+  pattern: "$DB.execute($$$ARGS)"
+  inside:
+    kind: for_statement
+    stopBy: end

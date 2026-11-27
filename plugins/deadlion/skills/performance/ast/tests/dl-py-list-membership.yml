@@ -1,0 +1,5 @@
+id: dl-py-list-membership
+valid:
+  - "for x in queries:\n use(index.get(x))"
+invalid:
+  - "for x in queries:\n use(x in keys)"

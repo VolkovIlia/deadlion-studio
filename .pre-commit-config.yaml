@@ -33,6 +33,14 @@ repos:
         language: system
         pass_filenames: true
 
+  - repo: local
+    hooks:
+      - id: dl-analyze
+        name: Performance diagnostics
+        entry: plugins/deadlion/skills/performance/scripts/dl-analyze
+        language: system
+        files: \.(py|c|cpp|cc|cxx|js|ts|java|go|kt|rs)$
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:

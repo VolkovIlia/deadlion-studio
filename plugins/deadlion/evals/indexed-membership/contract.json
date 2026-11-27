@@ -1,0 +1,20 @@
+{
+  "mode": "Performance",
+  "problem": "Count matching membership probes",
+  "input_dimensions": "n keys and q probes",
+  "scale": "n=q=6000",
+  "distribution": "Sequential integers, all probes hit exactly once",
+  "constraints": "Deterministic exact integer count",
+  "alternatives": [
+    {"algorithm":"scan","time":"O(nq) worst case","space":"O(n) list","assumptions":"Unsorted list and equality takes constant time"},
+    {"algorithm":"index","time":"O(n+q) expected","space":"O(n) hash table","assumptions":"Bounded integer hashing cost and well-distributed hashes"}
+  ],
+  "choice": "index",
+  "invariant": "After processing k probes, the count equals the number of hits in the first k",
+  "oracle": "For range(n) probing range(n), the exact result is n",
+  "workload": "input",
+  "build": "Same CPython interpreter for both commands",
+  "budget": {"wall_time_regression_fraction": 0.05, "max_wall_ratio": 0.7},
+  "benchmark": {"baseline":["python3","scan.py"], "candidate":["python3","indexed.py"], "expected":"expected"},
+  "verify": "Run dl-perf with scan.py, indexed.py, input and expected"
+}

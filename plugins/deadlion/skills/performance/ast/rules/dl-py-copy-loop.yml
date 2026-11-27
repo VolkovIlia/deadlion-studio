@@ -1,0 +1,9 @@
+id: dl-py-copy-loop
+language: Python
+severity: warning
+message: "Check type, copy size, aliasing and ownership. Copying n elements q times can cost O(q n)."
+rule:
+  pattern: "$X.copy()"
+  inside:
+    kind: for_statement
+    stopBy: end

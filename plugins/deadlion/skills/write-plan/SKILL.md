@@ -54,3 +54,6 @@ Depends: —
 ## Finish
 Show the task list (one line per task) and ask the user to approve. On approval set
 `Status: approved`. For a one-file change the plan may stay inline in the conversation.
+
+For performance-sensitive work, freeze the workload, reference answer, build configuration and allowed regression before implementation.
+For Performance, Research and Evolution attach a JSON contract to the plan and run the performance skill's scripts/dl-contract. The indexed-membership eval supplies a worked example. Structural validation checks presence and shape; the reviewer assesses the bounds and invariant.

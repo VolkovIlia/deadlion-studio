@@ -1,0 +1,9 @@
+id: dl-ts-loop-serialization
+language: TypeScript
+severity: warning
+message: "Check whether the value or its serialization hooks change before hoisting."
+rule:
+  pattern: "JSON.stringify($X)"
+  inside:
+    kind: for_in_statement
+    stopBy: end

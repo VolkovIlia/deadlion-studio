@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Execute a trusted contract from its directory and report fresh evidence."""
+import json
+import math
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+
+
+def run(path):
+    scripts = Path(__file__).resolve().parent
+    contract = json.loads(path.read_bytes())
+    subprocess.run([scripts / "dl-contract", path], stdout=sys.stderr, check=True)
+    spec = contract["benchmark"]
+    budgets = contract["budget"]
+    if set(budgets) - {"wall_time_regression_fraction", "max_wall_ratio"}:
+        raise ValueError("contract contains a budget this runner cannot verify")
+    tolerance = budgets["wall_time_regression_fraction"]
+    ceiling = min(1 + tolerance, budgets.get("max_wall_ratio", math.inf))
+    args = [scripts / "dl-perf", "--input", contract["workload"], "--expected", spec["expected"],
+            "--build", contract["build"], "--tolerance", str(tolerance)]
+    for key in ("baseline", "candidate"):
+        argv = spec[key]
+        if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+            raise ValueError(f"{key} must be a nonempty argv array")
+        args.extend(("--" + key, shlex.join(argv)))
+    trial = subprocess.run(args, cwd=path.parent, stdout=subprocess.PIPE, check=False)
+    report = json.loads(trial.stdout)
+    if trial.returncode == 0:
+        low, high = report["interval"]
+        if low > ceiling:
+            report["status"] = "PERFORMANCE REGRESSION"
+        elif high > ceiling:
+            report["status"] = "INCONCLUSIVE"
+    report.update(contract=str(path), max_wall_ratio=ceiling)
+    print(json.dumps(report))
+    return {"VERIFIED": 0, "PERFORMANCE REGRESSION": 1}.get(report["status"], 2)
+
+
+if __name__ == "__main__":
+    try:
+        if len(sys.argv) != 2:
+            raise ValueError("usage: dl-perf-gate CONTRACT.json")
+        sys.exit(run(Path(sys.argv[1]).resolve()))
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
+        sys.exit(2)

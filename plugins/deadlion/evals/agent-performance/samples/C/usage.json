@@ -1,0 +1,20 @@
+{
+  "membership": {
+    "input_tokens": 95091,
+    "cached_input_tokens": 83584,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 677,
+    "reasoning_output_tokens": 71,
+    "tool_commands": 10,
+    "wall_seconds_estimate": null
+  },
+  "suite": {
+    "input_tokens": 217056,
+    "cached_input_tokens": 198784,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 5132,
+    "reasoning_output_tokens": 2049,
+    "tool_commands": 15,
+    "wall_seconds_estimate": 121
+  }
+}

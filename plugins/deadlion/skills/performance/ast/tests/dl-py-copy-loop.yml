@@ -1,0 +1,5 @@
+id: dl-py-copy-loop
+valid:
+  - "for x in xs:\n use(buf,x)"
+invalid:
+  - "for x in xs:\n use(buf.copy(),x)"

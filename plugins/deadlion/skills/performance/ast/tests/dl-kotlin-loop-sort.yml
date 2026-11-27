@@ -1,0 +1,5 @@
+id: dl-kotlin-loop-sort
+valid:
+  - "fun f(){ val order=data.sorted(); for (x in xs) { use(order,x) } }"
+invalid:
+  - "fun f(){ for (x in xs) { use(data.sorted(), x) } }"

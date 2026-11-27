@@ -1,0 +1,5 @@
+id: dl-rust-loop-clone
+valid:
+  - "fn f(){ for x in xs { use_it(&buf,x); } }"
+invalid:
+  - "fn f(){ for x in xs { use_it(buf.clone(),x); } }"

@@ -1,0 +1,9 @@
+id: dl-js-repeated-spread
+language: JavaScript
+severity: warning
+message: "Copying the growing prefix each iteration can be quadratic. Check aliasing before mutating in place."
+rule:
+  pattern: "$A = [...$A, $X]"
+  inside:
+    kind: for_in_statement
+    stopBy: end

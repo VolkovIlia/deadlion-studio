@@ -1,0 +1,9 @@
+id: dl-py-list-membership
+language: Python
+severity: warning
+message: "Check the container type and number of probes. Linear membership across q probes costs O(q n). Hashing may cost more for small inputs or require extra memory."
+rule:
+  pattern: "$X in $Y"
+  inside:
+    kind: for_statement
+    stopBy: end

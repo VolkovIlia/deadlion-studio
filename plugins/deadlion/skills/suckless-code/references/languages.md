@@ -43,8 +43,8 @@ scaffold skill). For any other language, apply the layout checklist below by han
 - No `unwrap`/`expect` outside tests; errors bubble to `main` as `Result` and end
   in `die`.
 - No async runtime unless concurrent network I/O is the job.
-- Release profile as in the template: `opt-level = "s"`, `lto`, `panic = "abort"`,
-  `strip`, `codegen-units = 1`.
+- Size-oriented CLI template defaults: `opt-level = "s"`, `lto`, `panic = "abort"`,
+  `strip`, `codegen-units = 1`. For compute-intensive workloads compare release profiles under the actual speed and size budgets.
 - Manual argument parsing for small CLIs; no clap.
 - Terminal UI (filter/TUI): std + `libc` only (termios, `TIOCGWINSZ`, `poll`); template
   `rust-tui`; ratatui/crossterm only with a Decisions line.

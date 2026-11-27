@@ -61,3 +61,5 @@ Report the listing as a checklist: each stage, its file, and `missing | draft | 
 - Upstream file wrong? Go back to that stage and set it to `draft`; do not patch it from a downstream stage.
 - Release runs only when the user asks.
 - Reply to the user in their language; artifacts are written in the user's language too unless the repo's docs use another.
+
+Select Standard, Performance, Research or Evolution using the performance skill. Carry the mode through the existing stages.

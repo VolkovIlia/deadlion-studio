@@ -1,0 +1,9 @@
+id: dl-rust-loop-clone
+language: Rust
+severity: warning
+message: "Check ownership, type and clone cost. Cheap handles and required ownership are exclusions."
+rule:
+  pattern: "$X.clone()"
+  inside:
+    kind: for_expression
+    stopBy: end

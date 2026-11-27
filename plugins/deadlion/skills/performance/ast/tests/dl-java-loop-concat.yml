@@ -1,0 +1,6 @@
+id: dl-java-loop-concat
+valid:
+  - "class A { void f(String[] xs) { StringBuilder s=new StringBuilder(); for(String x:xs) {s.append(x);} }}"
+  - "class A { int f(int[] xs){int n=0; for(int x: xs){n += x;} return n;} }"
+invalid:
+  - "class A { String f(String[] xs) { String s=\"\"; for(String x:xs) {s = s.concat(x);} return s; }}"

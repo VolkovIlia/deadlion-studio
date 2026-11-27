@@ -47,3 +47,5 @@ Then add one line: how many findings were dropped as unconfirmed.
 
 Write `.dev-docs/features/<slug>/review.md` (format in `${CLAUDE_SKILL_DIR}/../workflow/references/artifacts.md`) only when a feature slug is
 active; otherwise print only.
+
+Review workload assumptions, invariants, allocation and I/O costs. Confirm each heuristic finding against evidence before requiring a change.

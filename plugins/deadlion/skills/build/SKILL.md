@@ -47,3 +47,5 @@ at once. Tasks in the same project, with `Project: —`, or touching `contracts/
 - Never commit. Commits go through the `commit` skill, only on user request.
 - Never edit code yourself to "finish" a task; send it back to the implementer.
 - Never weaken a test, gate or `Verify:` command to make it pass.
+
+Run the performance skill when the approved plan contains a resource budget or algorithm experiment.

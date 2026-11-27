@@ -1,0 +1,9 @@
+id: dl-java-loop-concat
+language: Java
+severity: warning
+message: "Check operand types. Repeated immutable string construction can copy a growing prefix. Numeric addition is an exclusion."
+rule:
+  pattern: "$S = $S.concat($X)"
+  inside:
+    kind: enhanced_for_statement
+    stopBy: end

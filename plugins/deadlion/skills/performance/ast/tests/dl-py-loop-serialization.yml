@@ -1,0 +1,5 @@
+id: dl-py-loop-serialization
+valid:
+  - "payload=json.dumps(cfg)\nfor x in xs:\n send(x,payload)"
+invalid:
+  - "for x in xs:\n send(x,json.dumps(cfg))"

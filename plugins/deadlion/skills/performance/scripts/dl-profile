@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Collect Linux resource or PMU evidence for one trusted command."""
+import argparse
+import json
+import math
+import os
+import platform
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+def allocations(args, directory):
+    trace = directory / "trace.bin"
+    report = directory / "stats.json"
+    subprocess.run(["memray", "run", "-o", trace, *args.command], stdout=sys.stderr,
+                   timeout=args.timeout, check=True)
+    subprocess.run(["memray", "stats", "--json", "-o", report, trace], stdout=sys.stderr,
+                   timeout=args.timeout, check=True)
+    stats = json.loads(report.read_text())
+    return dict(allocation_count=stats["total_num_allocations"],
+                allocated_bytes=stats["total_bytes_allocated"])
+
+
+def collect(args):
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "measurements"
+        if args.metric == "allocations":
+            return allocations(args, Path(directory))
+        if args.metric == "resources":
+            tool = ["/usr/bin/time", "-o", str(output), "-f", "%U %S %M %c %w"]
+        else:
+            tool = ["perf", "stat", "--all-user", "--no-big-num", "-x", ";", "-o", str(output),
+                    "-e", "cycles,instructions,branches,branch-misses,cache-misses", "--"]
+            if Path("/sys/bus/event_source/devices/cpu_atom").exists():
+                tool.insert(2, "--hybrid-merge")
+        run = subprocess.run(tool + args.command, env={**os.environ, "LC_ALL": "C"},
+                             stdout=sys.stderr, timeout=args.timeout)
+        if run.returncode:
+            raise ValueError(f"profiler or workload exited {run.returncode}")
+        raw = output.read_text()
+    if args.metric == "resources":
+        keys = ["user_cpu_s", "system_cpu_s", "peak_rss_kib", "involuntary_switches", "voluntary_switches"]
+        return dict(zip(keys, map(float, raw.split()), strict=True))
+    counters = {}
+    for line in raw.splitlines():
+        if line and not line.startswith("#"):
+            value, _, name, *_ = line.split(";")
+            counters[name] = float(value)
+    required = {"cycles", "instructions", "branches", "branch-misses", "cache-misses"}
+    if counters.keys() != required or counters["cycles"] <= 0:
+        raise ValueError("incomplete PMU counters")
+    counters["ipc"] = counters["instructions"] / counters["cycles"]
+    return counters
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--max", action="append", default=[], metavar="METRIC=CEILING")
+    parser.add_argument("metric", choices=["resources", "pmu", "allocations"])
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    if args.command[:1] == ["--"]:
+        args.command.pop(0)
+    if not args.command or args.timeout <= 0:
+        parser.error("supply a command and positive timeout")
+    try:
+        ceilings = {}
+        for item in args.max:
+            key, value = item.split("=", 1)
+            ceiling = float(value)
+            if not math.isfinite(ceiling) or ceiling < 0 or key in ceilings:
+                raise ValueError("invalid or duplicate metric ceiling")
+            ceilings[key] = ceiling
+        metrics = collect(args)
+        if ceilings.keys() - metrics.keys():
+            raise ValueError("required metric was not measured")
+        excess = [key for key in ceilings if metrics[key] > ceilings[key]]
+    except (OSError, KeyError, ValueError, subprocess.SubprocessError) as error:
+        print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
+        sys.exit(2)
+    print(json.dumps(dict(status="ERROR" if excess else "MEASURED", platform=platform.platform(),
+                          command=args.command, metrics=metrics, budgets=ceilings, exceeded=excess)))
+    sys.exit(1 if excess else 0)

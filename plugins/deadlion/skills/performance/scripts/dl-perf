@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Compare two trusted deterministic commands on one immutable stdin workload."""
+import argparse
+import hashlib
+import json
+import math
+import os
+import platform
+import shlex
+import shutil
+import statistics
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def measure(command, workload, expected, timeout):
+    start = time.perf_counter_ns()
+    result = subprocess.run(command, input=workload, stdout=subprocess.PIPE,
+                            check=True, timeout=timeout)
+    elapsed = time.perf_counter_ns() - start
+    if digest(result.stdout) != expected:
+        raise ValueError("stdout differs from the trusted expected output")
+    return elapsed
+
+
+def compare(pairs, tolerance):
+    ratios = sorted(candidate / baseline for baseline, candidate in pairs)
+    n = len(ratios)
+    tail = 0
+    for rank in range(n // 2):
+        tail += math.comb(n, rank)
+        if 40 * tail > 2 ** n:
+            break
+    low, high = ratios[rank - 1], ratios[n - rank]
+    if low > 1 + tolerance:
+        status = "PERFORMANCE REGRESSION"
+    elif high <= 1 + tolerance:
+        status = "VERIFIED"
+    else:
+        status = "INCONCLUSIVE"
+    return dict(status=status, median_ratio=statistics.median(ratios), interval=[low, high])
+
+
+def command_inputs(commands):
+    hashes = {}
+    for command in commands:
+        executable = shutil.which(command[0])
+        if executable is None:
+            raise ValueError(f"missing executable: {command[0]}")
+        for argument in (executable, *command[1:]):
+            path = Path(argument)
+            if path.is_file() and str(path.resolve()) not in hashes:
+                with path.open("rb") as stream:
+                    hashes[str(path.resolve())] = hashlib.file_digest(stream, "sha256").hexdigest()
+    return hashes
+
+
+def environment():
+    revision = subprocess.run(["git", "rev-parse", "--verify", "HEAD"], capture_output=True,
+                              text=True).stdout.strip() if shutil.which("git") else None
+    model = next((line.partition(":")[2].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
+                  if line.startswith(("model name", "Hardware"))), platform.machine())
+    return dict(revision=revision or None, cpu_model=model, platform=platform.platform(),
+                machine=platform.machine(), python=sys.version, affinity=sorted(os.sched_getaffinity(0)))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ("baseline", "candidate", "input", "expected", "build"):
+        parser.add_argument("--" + name, required=True)
+    parser.add_argument("--runs", type=int, default=16)
+    parser.add_argument("--warmups", type=int, default=1)
+    parser.add_argument("--timeout", type=float, default=30)
+    parser.add_argument("--tolerance", required=True, type=float)
+    args = parser.parse_args()
+    if not (8 <= args.runs <= 1000 and 0 <= args.warmups <= 100 and
+            0 <= args.tolerance < float("inf") and 0 < args.timeout < float("inf")):
+        parser.error("invalid measurement limits (runs 8..1000, warmups 0..100)")
+    workload = Path(args.input).read_bytes()
+    expected = digest(Path(args.expected).read_bytes())
+    commands = [shlex.split(args.baseline), shlex.split(args.candidate)]
+    if not all(commands):
+        parser.error("empty command")
+    pairs = []
+    report = dict(parameters=vars(args), **environment(),
+                  input_sha256=digest(workload), expected_sha256=expected, wall_ns=pairs)
+    try:
+        report["command_inputs"] = command_inputs(commands)
+        for i in range(-args.warmups, args.runs):
+            pair = [0, 0]
+            for index in (i % 2, 1 - i % 2):
+                pair[index] = measure(commands[index], workload, expected, args.timeout)
+            if i >= 0:
+                pairs.append(pair)
+        if report["command_inputs"] != command_inputs(commands):
+            raise ValueError("command inputs changed during measurement")
+        report.update(compare(pairs, args.tolerance))
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        report.update(status="NOT VERIFIED", reason=str(error))
+    print(json.dumps(report))
+    return {"VERIFIED": 0, "PERFORMANCE REGRESSION": 1}.get(report["status"], 2)
+
+
+def frontier(path):
+    """Find nondominated candidates in one trusted, comparable measurement cohort."""
+    cohort = json.loads(Path(path).read_text())
+    directions = cohort["directions"]
+    if not directions or any(d not in ("min", "max") for d in directions.values()):
+        raise ValueError("declare min or max for each metric")
+    costs = {}
+    rejected = {}
+    for name, trial in cohort["candidates"].items():
+        if trial["status"] != "VERIFIED":
+            rejected[name] = trial["status"]
+            continue
+        metrics = trial["metrics"]
+        if metrics.keys() != directions.keys() or any(
+                type(v) not in (int, float) or not math.isfinite(v) for v in metrics.values()):
+            raise ValueError("missing or invalid metric")
+        costs[name] = tuple(metrics[k] * (1 if d == "min" else -1) for k, d in directions.items())
+    winners = [name for name, x in costs.items() if not any(
+        y != x and all(v <= w for v, w in zip(y, x)) for y in costs.values())]
+    print(json.dumps(dict(status="MEASURED" if winners else "NOT VERIFIED",
+                          frontier=winners, rejected=rejected, observations=cohort["candidates"])))
+    return 0 if winners else 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(frontier(sys.argv[2]) if len(sys.argv) == 3 and sys.argv[1] == "frontier" else main())
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
+        sys.exit(2)

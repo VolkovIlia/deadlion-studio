@@ -1,0 +1,5 @@
+id: dl-go-loop-connection
+valid:
+  - "package p\nfunc f(){ db,_ := sql.Open(\"pg\",\"db\"); for range xs { use(db) } }"
+invalid:
+  - "package p\nfunc f(){ for range xs { sql.Open(\"pg\",\"db\") } }"

@@ -2,7 +2,7 @@
 name: researcher
 description: Researches a question on the web and in the codebase and returns an evidence-tagged, source-linked summary. Use for library/approach comparisons, market or competitor research, and unknown APIs.
 tools: Read, Grep, Glob, WebSearch, WebFetch, Write
-model: sonnet
+model: inherit
 color: cyan
 ---
 
@@ -64,3 +64,5 @@ FILE: .dev-docs/research/<topic>.md
 ```
 Every claim carries a level tag and a link (or `path:line`). Untagged claims are not
 allowed.
+
+When comparing algorithms, include input scales and assumptions for each bound. Distinguish proof, static inference and empirical scaling.

@@ -1,0 +1,5 @@
+id: dl-py-sql-loop
+valid:
+  - "db.executemany(query, rows)"
+invalid:
+  - "for row in rows:\n db.execute(query, (row,))"
