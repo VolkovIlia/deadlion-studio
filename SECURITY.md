@@ -6,7 +6,7 @@ Only the latest release of each plugin gets security fixes.
 
 | Plugin | Supported |
 |---|---|
-| `deadlion` 4.2.x | yes |
+| `deadlion` 4.3.x | yes |
 | `deadlion-triz` 4.0.x | yes |
 | anything older | no |
 
@@ -34,6 +34,7 @@ The plugins run code on your machine, so these are in scope:
   and before `git commit`;
 - the tools in `plugins/*/skills/*/scripts/` (`dl-size`, `dl-budget`, `dl-guard`,
   `dl-contrast`, `dl-tui`, `dl-new`);
-- skill or agent text that makes Claude run commands you did not ask for.
+- the OMP extensions, experiment launcher and performance contract runners;
+- skill or agent text that makes a harness run commands you did not ask for.
 
 Bugs in Claude Code itself go to Anthropic, not here.

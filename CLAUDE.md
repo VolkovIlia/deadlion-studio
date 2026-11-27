@@ -1,7 +1,6 @@
 # deadlion-studio
 
-Claude Code plugin marketplace. No build step; everything is Markdown, JSON and
-stdlib-only Python/POSIX sh, plus the C/Rust/sh program templates of `scaffold`.
+Agent Skills and Claude Code plugin marketplace. The core includes OMP JavaScript extensions, Python and shell tools, and C/Rust/sh templates. Performance diagnostics invoke optional native tools.
 
 ## Layout
 - `.claude-plugin/marketplace.json` — one entry per directory in `plugins/`.
@@ -12,7 +11,8 @@ stdlib-only Python/POSIX sh, plus the C/Rust/sh program templates of `scaffold`.
   `skills/ux-design/scripts/dl-contrast`, `skills/ui-verify/scripts/dl-tui`,
   `skills/scaffold/scripts/dl-new` (templates in `skills/scaffold/templates/<lang>/`;
   a template `gitignore` becomes `.gitignore`, `__NAME__` never as an identifier).
-- `scripts/export-skills` — copies skills to `.agents/skills/` for Codex/Copilot.
+- `plugins/deadlion/omp/` holds native OMP adapters. Performance tools and ast-grep rules live in `plugins/deadlion/skills/performance/`.
+- `scripts/export-skills` — copies skills to `.agents/skills/` for OMP, Codex and Copilot.
 - `tests/` — pytest suites plus `test_export_skills.sh`.
 - `.github/` — CI, issue forms, PR template, CODEOWNERS, Dependabot. Root
   `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`.

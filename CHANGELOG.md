@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## 4.3.0 - 2026-11-28
+## [4.3.0] - 2026-11-28
 
 - The core plugin runs executable time and resource contracts, structural performance diagnostics and isolated OMP experiments.
 - Pull requests exercise current and previously approved workload contracts. The CLI records raw timings, executable hashes, profiler evidence and inconclusive results.
@@ -34,5 +34,6 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.2.0...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.3.0...HEAD
+[4.3.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.3.0
 [4.2.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.2.0

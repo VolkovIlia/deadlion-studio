@@ -4,12 +4,13 @@
 [![Release](https://img.shields.io/github/v/release/VolkovIlia/deadlion-studio)](https://github.com/VolkovIlia/deadlion-studio/releases)
 [![License: Apache-2.0](https://img.shields.io/github/license/VolkovIlia/deadlion-studio)](LICENSE)
 
-Engineering skills for OMP, Claude Code and Codex. Programs stay small,
-they talk in plain text, and nothing counts as done without proof. The core plugin
-`deadlion` takes Claude from idea to release with sixteen skills, three subagents,
-three hooks and six small Unix tools.
+Deadlion Studio provides an engineering workflow for OMP, Claude Code and Codex.
+The core plugin takes a project from design to release. Its performance tools
+compare implementations against a fixed workload, correctness oracle and resource budget.
 
-## Three directions
+**Current release** · [deadlion 4.3.0](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.3.0) · [Performance engineering](#performance-engineering) · [Release measurements](docs/performance-audit.md#release-verification-on-fedora-44)
+
+## Engineering workflow
 
 1. **Suckless + Unix engineering** — a system is split into small programs under
    `projects/<name>/`. Each has one job, its own language, Makefile, man page and
@@ -23,8 +24,25 @@ three hooks and six small Unix tools.
 3. **Product discovery** — problem, users and jobs, evidence-tagged claims, the
    riskiest assumption tested against a threshold fixed in advance, scope cut by
    subtraction.
+4. **Algorithm and performance engineering** — choose a data structure for the expected input,
+   state the invariant, then check correctness, time and memory against a baseline.
 
 ## Install
+
+### OMP
+
+From a checkout of Deadlion Studio, export the skills to the project you want to work on.
+Launch OMP in that project with the optional edit diagnostics adapter.
+
+```sh
+studio=$PWD
+project=/path/to/your/project
+scripts/export-skills "$project/.agents/skills" deadlion
+cd "$project"
+omp -e "$studio/plugins/deadlion/omp/performance.mjs"
+```
+
+### Claude Code
 
 ```
 /plugin marketplace add VolkovIlia/deadlion-studio
@@ -52,7 +70,7 @@ for your approval before the next one. Any skill also works alone, for example
 
 ## Core skills
 
-Every skill is also a slash command: `/deadlion:<skill>`.
+In Claude Code each core skill is available as `/deadlion:<skill>`.
 
 | Skill | Does |
 |---|---|
@@ -66,6 +84,7 @@ Every skill is also a slash command: `/deadlion:<skill>`.
 | `write-plan` | Small ordered tasks, each with files, project, a test first and a verify command → `plan.md` |
 | `build` | Runs `plan.md` task by task through the `implementer` and `reviewer` subagents |
 | `suckless-code` | Size limits, per-program budgets, language choice, shrinking code, limit-gaming detection, `dl-size`, `dl-budget` |
+| `performance` | Compares algorithms, profiles resource use and verifies performance contracts in Standard, Performance, Research and Evolution modes |
 | `testing` | Test-first; unit → integration → regression; behaviour, not wiring; memory-safe suites |
 | `debug` | Reproduce, failing test, L1/L2/L3 classification, root cause, minimal fix |
 | `review` | Reviews a diff via the `reviewer` subagent, keeps only confirmed findings |
@@ -110,9 +129,15 @@ repo-level `.dev-docs/system.md`. Each file starts with `# <Title>` and
 | `plan.md` | `write-plan` | `### T<n>` tasks with Files/Project/Change/Test/Verify/Depends and a done checkbox |
 | `review.md` | `review` | `BLOCKING\|IMPORTANT\|NIT path:line — finding — evidence` |
 
+## Performance engineering
+
+The portable [performance skill](plugins/deadlion/skills/performance/SKILL.md) includes a contract validator, Ruff and ast-grep diagnostic adapters, Linux resource profiling and a paired-command benchmark with a trusted stdout fixture. Install Ruff 0.15.4 for Python and ast-grep 0.51.3 for the structural rules. On Fedora, GNU time supplies resource metrics and perf supplies optional PMU counters. The benchmark uses Python 3.11+ and its standard library. See the [command reference](plugins/deadlion/skills/performance/references/commands.md) for OMP installation, startup and measurement examples. The [audit](docs/performance-audit.md) records upstream revisions and legacy capabilities.
+
+CI executes every tracked `.performance/**/contract.json` and the indexed-membership control on the current checkout. Run `plugins/deadlion/skills/performance/scripts/dl-perf-gate PATH/contract.json` locally to reproduce the gate. A missing oracle, an unsupported budget, a regression or an inconclusive comparison fails the job. See the [worked contract](plugins/deadlion/evals/indexed-membership/contract.json).
+
 ## Tools
 
-All are stdlib-only Python 3. The checkers print `path:line: message`, one per
+The following project tools are written in Python 3. The checkers print `path:line: message`, one per
 line, nothing when clean; `dl-new` is silent on success. Exit `0` clean, `1`
 violations, `2` usage or IO error. `dl-tui` prints screens and exits `0` when its
 script ran.
@@ -126,9 +151,8 @@ script ran.
 | `skills/ui-verify/scripts/dl-tui [-s COLSxROWS] CMD [STEP...]` | runs a terminal program in a headless tmux, sends keys, text and resizes, prints the screens | `DL_TUI_SETTLE_MS` (2000) |
 | `skills/commit/scripts/dl-guard [FILE...]` | staged files: forbidden extensions/dirs, secret-file names, binaries, size | `DL_GUARD_MAX_KB` (500), `DL_GUARD_MAX_TOTAL_MB` (10), `DL_GUARD_MAX_FILES` (100) |
 
-Hooks: `dl-size --hook` and `dl-contrast --hook` run after every Write/Edit and
-report violations to Claude; `dl-guard --hook` runs before `git commit` and
-blocks it on violations. Set `DL_HOOKS=0` to disable all three.
+Claude Code runs `dl-size`, `dl-contrast` and `dl-analyze` after edits. Before a
+commit, `dl-guard` checks staged files. CI runs its own checks on the checkout.
 
 ## Codex and Copilot
 
@@ -152,9 +176,3 @@ problems to [`SECURITY.md`](SECURITY.md). Changes are listed in
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
-
-### Performance engineering
-
-The portable [performance skill](plugins/deadlion/skills/performance/SKILL.md) includes a contract validator, Ruff and ast-grep diagnostic adapters, Linux resource profiling and a paired-command benchmark with a trusted stdout fixture. Install Ruff 0.15.4 for Python and ast-grep 0.51.3 for the structural rules. On Fedora, GNU time supplies resource metrics and perf supplies optional PMU counters. The benchmark uses Python 3.11+ and its standard library. See the [command reference](plugins/deadlion/skills/performance/references/commands.md) for OMP installation, startup and measurement examples. The [audit](docs/performance-audit.md) records upstream revisions and legacy capabilities.
-
-CI executes every tracked `.performance/**/contract.json` and the indexed-membership control on the current checkout. Run `plugins/deadlion/skills/performance/scripts/dl-perf-gate PATH/contract.json` locally to reproduce the gate. A missing oracle, an unsupported budget, a regression or an inconclusive comparison fails the job. See the [worked contract](plugins/deadlion/evals/indexed-membership/contract.json).
