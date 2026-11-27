@@ -59,7 +59,7 @@ Direct loading of upstream pi-autoresearch 1.9.0 failed in the isolated OMP sess
 | Evidence | Observed result | Boundary |
 |---|---|---|
 | Native OMP 19.2.1 lifecycle | Two separate RPC sessions against a local scripted transport. Keep, pause, resume, failed independent check, discard, persisted attempts and original branch checked by tests/omp_autoresearch_smoke.py | Harness integration test; agent quality measured separately |
-| Structural fixtures | Fifteen ast-grep rules. Each found its positive fixture and omitted its negative fixtures | Curated in-distribution examples; warning-level precision does not imply field precision |
+| Structural fixtures | Nineteen ast-grep rules. Each found its positive fixture and omitted its negative fixtures | Curated in-distribution examples; warning-level precision does not imply field precision |
 | Shell edit / commit | A real pre-commit installation in a temporary Git repository blocked invalid Python with exit 1 and accepted the corrected file | Local hooks can be skipped. CI recomputes from the checkout |
 | Latency of analysis | See performance-overhead.json for eleven raw runs per case and median | Python process startup included, on one Fedora machine |
 | Source checkout | Added CLI, AST corpus, references and smoke tests. Workflow, architecture, planning, build, review, verify, agents, hooks, pre-commit and CI call or route to those checks | Hosted CI passed the published implementation. Branch-protection policy is managed separately |
@@ -105,4 +105,4 @@ Deadlion 4.3.0 uses the existing architecture, plan, build, review and verify st
 
 [Paired and load evidence](../plugins/deadlion/evals/indexed-membership/) · [PMU and false-sharing fixture](../plugins/deadlion/evals/false-sharing/) · [Labelled issue sites](../plugins/deadlion/evals/static-holdout/) · [Generated code, grading, allocations and token records](../plugins/deadlion/evals/agent-performance/) · [CI on the first published implementation](https://github.com/VolkovIlia/deadlion-studio/actions/runs/46076456236)
 
-Local OMP 19.2.1 smoke tests validated resume and discard against a deterministic transport. A required hard provider-side token cap refuses launch. GPU performance, arbitrary OMP transports, production distributions and branch-protection configuration remain unverified. Structural diagnostics cover the shipped patterns. Other patterns, including exponential recursion and NUMA locality, require algorithm-specific reasoning or an external profiler.
+Local OMP 19.2.1 smoke tests validated resume and discard against a deterministic transport. A required hard provider-side token cap refuses launch. GPU performance, arbitrary OMP transports, production distributions and branch-protection configuration remain unverified. Structural diagnostics cover the shipped patterns. Other patterns, including more general overlapping recurrences and NUMA locality, require algorithm-specific reasoning or an external profiler.

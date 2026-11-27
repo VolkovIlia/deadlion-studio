@@ -1,0 +1,6 @@
+id: dl-py-unbounded-gather
+language: Python
+severity: warning
+message: "Gather schedules all input awaitables. Compare input cardinality and retained tasks with the concurrency budget. A small bounded batch is a valid use."
+rule:
+  pattern: "asyncio.gather(*[$F($X) for $X in $XS])"

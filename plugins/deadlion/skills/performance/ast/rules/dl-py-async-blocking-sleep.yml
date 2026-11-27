@@ -1,0 +1,9 @@
+id: dl-py-async-blocking-sleep
+language: Python
+severity: warning
+message: "A synchronous sleep blocks the event-loop thread. Confirm module binding and intended scheduling."
+rule:
+  pattern: "time.sleep($T)"
+  inside:
+    pattern: "async def $F($$$ARGS): $$$BODY"
+    stopBy: end

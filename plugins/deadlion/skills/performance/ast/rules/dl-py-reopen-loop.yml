@@ -1,0 +1,13 @@
+id: dl-py-reopen-loop
+language: Python
+severity: warning
+message: "Opening the same path per iteration adds system calls. Check path stability, rotation, file mode and flush semantics before reusing a handle."
+rule:
+  pattern: "open($P, $$$ARGS)"
+  inside:
+    kind: for_statement
+    stopBy: end
+  not:
+    inside:
+      pattern: "for $P in $XS: $$$BODY"
+      stopBy: end

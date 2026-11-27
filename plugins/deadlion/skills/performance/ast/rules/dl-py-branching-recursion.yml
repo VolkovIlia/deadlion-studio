@@ -1,0 +1,16 @@
+id: dl-py-branching-recursion
+language: Python
+severity: warning
+message: "Repeated calls on overlapping n-1 and n-2 states may yield exponential work. Measure distinct states and check for memoization."
+rule:
+  pattern: "$F($N - 1) + $F($N - 2)"
+  inside:
+    pattern: "def $F($N): $$$BODY"
+    stopBy: end
+  not:
+    inside:
+      kind: decorated_definition
+      has:
+        kind: decorator
+        regex: '^@(functools\.)?(cache|lru_cache)(\(.*\))?$'
+      stopBy: end

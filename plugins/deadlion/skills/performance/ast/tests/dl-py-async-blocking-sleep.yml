@@ -1,0 +1,5 @@
+id: dl-py-async-blocking-sleep
+valid:
+  - "async def retry():\n await asyncio.sleep(1)"
+invalid:
+  - "async def retry():\n time.sleep(1)"

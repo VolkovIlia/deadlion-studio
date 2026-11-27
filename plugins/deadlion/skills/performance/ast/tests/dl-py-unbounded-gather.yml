@@ -1,0 +1,5 @@
+id: dl-py-unbounded-gather
+valid:
+  - "async def run(xs):\n for batch in batched(xs, 8):\n  await asyncio.gather(*map(fetch, batch))"
+invalid:
+  - "async def run(xs):\n await asyncio.gather(*[fetch(x) for x in xs])"

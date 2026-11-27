@@ -1,0 +1,5 @@
+id: dl-py-reopen-loop
+valid:
+  - "with open(path,\"a\") as f:\n for row in rows: f.write(row)"
+invalid:
+  - "for row in rows:\n with open(path,\"a\") as f: f.write(row)"
