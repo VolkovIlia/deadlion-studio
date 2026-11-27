@@ -1,0 +1,108 @@
+{
+  "mode": "Research",
+  "problem": "Sort signed integers, one per line",
+  "input_dimensions": "Number n of records",
+  "scale": "128 through 32768 records",
+  "distribution": "Uniform bounded integers or reverse order",
+  "constraints": "Every input record must occur with its original multiplicity",
+  "alternatives": [
+    {
+      "algorithm": "python",
+      "time": "O(n log n) comparisons",
+      "space": "O(n) records",
+      "assumptions": "CPython list of bounded integers fits in memory"
+    },
+    {
+      "algorithm": "coreutils",
+      "time": "Implementation dependent",
+      "space": "Buffer and external sort storage",
+      "assumptions": "GNU sort -n, C locale"
+    }
+  ],
+  "choice": "coreutils",
+  "invariant": "Ascending numeric order with the original histogram",
+  "oracle": "A counting reference reconstructs the output bytes from independent frequency bins",
+  "workload": "input",
+  "build": "Same CPython interpreter for both commands",
+  "budget": {
+    "wall_time_regression_fraction": 0.5,
+    "max_wall_ratio": 1.5,
+    "peak_rss_kib": 98304
+  },
+  "benchmark": {
+    "baseline": [
+      "python3",
+      "sort.py"
+    ],
+    "candidate": [
+      "sort",
+      "-n"
+    ],
+    "expected": "expected"
+  },
+  "verify": "Run dl-perf with scan.py, indexed.py, input and expected",
+  "computational_model": "Integer equality with bounded integer keys",
+  "lower_bound": "Reading all records takes at least n record accesses",
+  "scaling": {
+    "dimensions": {
+      "n": [
+        128,
+        256,
+        512,
+        1024,
+        2048,
+        4096,
+        8192,
+        16384,
+        32768
+      ]
+    },
+    "distributions": [
+      "uniform",
+      "reverse"
+    ],
+    "generator": [
+      "python3",
+      "generate.py"
+    ],
+    "implementations": {
+      "python": {
+        "argv": [
+          "python3",
+          "sort.py"
+        ],
+        "files": [
+          "sort.py"
+        ],
+        "instrument": [
+          "python3",
+          "sort.py",
+          "--comparisons"
+        ]
+      },
+      "coreutils": {
+        "argv": [
+          "sort",
+          "-n"
+        ],
+        "files": []
+      }
+    },
+    "limits": {
+      "seconds": 160,
+      "memory_mib": 128,
+      "max_points": 24
+    },
+    "seed": 441,
+    "min_repetitions": 7,
+    "model_tolerance": 0.2,
+    "models": [
+      "constant",
+      "log",
+      "linear",
+      "linearithmic",
+      "quadratic"
+    ],
+    "requirements": []
+  }
+}

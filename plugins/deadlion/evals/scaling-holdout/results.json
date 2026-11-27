@@ -1,0 +1,122 @@
+{
+  "binary_search": {
+    "expected": "log",
+    "status": "INCONCLUSIVE",
+    "models": [],
+    "decision": "abstained",
+    "samples": 132,
+    "sha256": "fb05a585e87564d40874e55c6642921b586ff30527e4d8d2204b505f7990634b"
+  },
+  "random_sort": {
+    "expected": "linearithmic",
+    "status": "INCONCLUSIVE",
+    "models": [
+      "linearithmic"
+    ],
+    "decision": "abstained",
+    "samples": 132,
+    "sha256": "19cd2572b2dd5580560e9de6ae4b22d57da746d50f2026ac890997e10d459b32"
+  },
+  "read_once": {
+    "expected": "linear",
+    "status": "EMPIRICALLY CONSISTENT",
+    "models": [
+      "linear"
+    ],
+    "decision": "correct",
+    "samples": 132,
+    "sha256": "6fc5ce449cfd3e41729dc2775020619c5fb1676b11c2d5561798fa33a28bd4e9"
+  },
+  "one_access": {
+    "expected": "constant",
+    "status": "INCONCLUSIVE",
+    "models": [
+      "constant",
+      "log",
+      "linear",
+      "linearithmic",
+      "quadratic",
+      "cubic"
+    ],
+    "decision": "abstained",
+    "samples": 132,
+    "sha256": "be67a62b108ac08cc1c53cfdbfe70bbdd18562331459caa2640bf87a1d954e2d"
+  },
+  "pairs": {
+    "expected": "quadratic",
+    "status": "EMPIRICALLY CONSISTENT",
+    "models": [
+      "quadratic"
+    ],
+    "decision": "correct",
+    "samples": 132,
+    "sha256": "b39943b1e3bc010a1f7e51c89fed134aec9ca85277703577a7be0d11f93602f2"
+  },
+  "cubes": {
+    "expected": "cubic",
+    "status": "EMPIRICALLY CONSISTENT",
+    "models": [
+      "cubic"
+    ],
+    "decision": "correct",
+    "samples": 121,
+    "sha256": "455a060b7426e58e3c84377a73eb404bf38ccd2dcead2507d927df93d2ea9df6"
+  },
+  "memoized_fib": {
+    "expected": "linear",
+    "status": "INCONCLUSIVE",
+    "models": [
+      "linear",
+      "linearithmic"
+    ],
+    "decision": "abstained",
+    "samples": 121,
+    "sha256": "4ec39058391f3959124fe32e5bce8e14fad9016dcd2ce9091f4e2723cdbdb7f6"
+  },
+  "recursive_fib": {
+    "expected": "1.618**n",
+    "status": "EMPIRICALLY CONSISTENT",
+    "models": [
+      "1.618**n"
+    ],
+    "decision": "correct",
+    "samples": 121,
+    "sha256": "8faa28597b76f0bd30133cd9343df298f87115fedad7fe1f6c88b7e11a8afb0b"
+  },
+  "launch_dominated": {
+    "expected": "linear",
+    "status": "INCONCLUSIVE",
+    "models": [
+      "linear",
+      "linearithmic",
+      "log",
+      "constant",
+      "quadratic",
+      "cubic"
+    ],
+    "decision": "abstained",
+    "samples": 132,
+    "sha256": "2fbbf50c7209649ac351d95f974f925175a3c89acd47fe531c6fc838f403d1f7"
+  },
+  "outliers": {
+    "expected": "linear",
+    "status": "INCONCLUSIVE",
+    "models": [
+      "linear",
+      "linearithmic"
+    ],
+    "decision": "abstained",
+    "samples": 132,
+    "sha256": "a820c96e8e3da253893c8a9f753b3a6a4b914409f10d99fff668989c5fb40fc5"
+  },
+  "bfs": {
+    "expected": "V+E",
+    "status": "EMPIRICALLY CONSISTENT",
+    "models": [
+      "V+E"
+    ],
+    "decision": "correct",
+    "samples": 275,
+    "sha256": "293f4a54c017a3678dada46f382fcb7bd79ee47df5db206ac379742fc6b5a10f"
+  }
+}

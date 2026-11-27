@@ -1,0 +1,30 @@
+name: Approved performance evidence
+on: pull_request_target
+permissions:
+  contents: read
+jobs:
+  approved-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Install isolation tools
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap dbus-user-session
+      - name: Fetch candidate Git objects
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "refs/pull/$PR_NUMBER/head"
+          test "$(git rev-parse FETCH_HEAD)" = "$PR_SHA"
+      - name: Measure with base evaluator
+        env:
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/approved-performance "$PR_SHA" "$RUNNER_TEMP/performance.jsonl"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: performance-evidence
+          path: ${{ runner.temp }}/performance.jsonl

@@ -1,63 +1,298 @@
 #!/usr/bin/env python3
 """Execute a trusted contract from its directory and report fresh evidence."""
+
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
 import shlex
 import subprocess
 import sys
+import time
 
 
-RESOURCE_KEYS = {"peak_rss_kib", "user_cpu_s", "system_cpu_s", "voluntary_switches", "involuntary_switches"}
+RESOURCE_KEYS = {
+    "cpu_time_s",
+    "peak_rss_kib",
+    "user_cpu_s",
+    "system_cpu_s",
+    "voluntary_switches",
+    "involuntary_switches",
+}
 
 
-def enforce_resources(scripts, path, contract, candidate_dir, report):
+PMU = {"cycles", "instructions", "cache-misses", "branch-misses", "branches"}
+ALLOCATIONS = {
+    "allocation_count",
+    "allocated_bytes",
+    "allocations_per_operation",
+    "allocated_bytes_per_operation",
+}
+LOAD = {"latency_p50_ns", "latency_p95_ns", "latency_p99_ns", "min_requests_per_second"}
+
+
+def enforce_resources(scripts, path, contract, candidate_dir, report, isolated=False):
     budgets = contract["budget"]
-    options = []
-    for key in sorted(RESOURCE_KEYS & budgets.keys()):
-        options.extend(["--max", f"{key}={budgets[key]}"])
-    if not options:
+    spec = contract["benchmark"]
+    cwd = candidate_dir or path.parent
+    data = (path.parent / contract["workload"]).read_bytes()
+    metrics = {}
+    for group, keys in (
+        ("resources", RESOURCE_KEYS),
+        ("allocations", ALLOCATIONS),
+        ("pmu", PMU),
+        ("load", LOAD),
+    ):
+        if not budgets.keys() & keys:
+            continue
+        cmd = spec["candidate"]
+        if group == "load":
+            requests = spec.get("requests", 1000)
+            if type(requests) is not int or not 100 <= requests <= 100000:
+                raise ValueError("load measurement requires 100..100000 requests")
+            if "latency_p99_ns" in budgets and requests < 1000:
+                raise ValueError("p99 gate requires at least 1000 requests")
+        if isolated:
+            if group == "allocations":
+                raise ValueError(f"{group} collector unavailable in isolated execution")
+            from correctness import inputs, checked_run
+
+            files = inputs(cwd, cmd, spec.get("candidate_files"))
+            expected = (path.parent / spec["expected"]).read_bytes()
+
+            def observe():
+                return checked_run(
+                    cwd,
+                    files,
+                    cmd,
+                    data,
+                    expected,
+                    spec.get("oracle", {}),
+                    path.parent,
+                    time.monotonic() + 30,
+                    512,
+                    pmu=group == "pmu",
+                )
+
+            if group == "load":
+                start = time.monotonic()
+                timings = sorted(observe()["wall_ns"] for _ in range(requests))
+                sample = {
+                    f"latency_p{p}_ns": timings[math.ceil(requests * p / 100) - 1] for p in (50, 95, 99)
+                }
+                sample["min_requests_per_second"] = requests / (time.monotonic() - start)
+            else:
+                sample = observe()
+        elif group == "load":
+            if spec.get("oracle", {}).get("kind", "exact") != "exact":
+                raise ValueError("load collector requires an exact oracle")
+            command = [
+                scripts / "dl-perf",
+                "load",
+                "--input",
+                path.parent / contract["workload"],
+                "--expected",
+                path.parent / spec["expected"],
+                "--requests",
+                str(spec.get("requests", 1000)),
+                "--",
+                *cmd,
+            ]
+            trial = subprocess.run(command, cwd=cwd, capture_output=True, check=True)
+            record = json.loads(trial.stdout)
+            sample = {"latency_" + k + "_ns": v for k, v in record["latency_ns"].items()}
+            timings = sorted(record["raw_latency_ns"])
+            sample["min_requests_per_second"] = record["requests_per_second"]
+        else:
+            if group == "allocations":
+                if Path(cmd[0]).name not in {"python", "python3"} or len(cmd) < 2 or cmd[1].startswith("-"):
+                    raise ValueError("allocation collector requires a Python script")
+                cmd = cmd[1:]
+            trial = subprocess.run(
+                [scripts / "dl-profile", group, "--", *cmd],
+                cwd=cwd,
+                input=data,
+                capture_output=True,
+                check=True,
+            )
+            sample = json.loads(trial.stdout)["metrics"]
+            if group == "resources":
+                sample["cpu_time_s"] = sample["user_cpu_s"] + sample["system_cpu_s"]
+        if group == "allocations" and any(key.endswith("_per_operation") for key in budgets):
+            ops = spec.get("operations_per_input")
+            if type(ops) is not int or ops <= 0:
+                raise ValueError("declare positive operations_per_input")
+            sample["allocations_per_operation"] = sample["allocation_count"] / ops
+            sample["allocated_bytes_per_operation"] = sample["allocated_bytes"] / ops
+        for key in budgets.keys() & keys:
+            value = sample[key]
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"invalid measurement for {key}")
+            metrics[key] = value
+            if group == "load" and key.startswith("latency_"):
+                from growth_models import quantile_interval
+
+                q = int(key.removeprefix("latency_p").removesuffix("_ns")) / 100
+                lo, hi = quantile_interval(timings, q, 0.95)
+                report.setdefault("latency_intervals_ns", {})[key] = [lo, hi]
+                if lo is not None and lo > budgets[key]:
+                    report["status"] = "ERROR"
+                elif (hi is None or hi > budgets[key]) and report.get("status") != "ERROR":
+                    report["status"] = "INCONCLUSIVE"
+                continue
+            if value < budgets[key] if key.startswith("min_") else value > budgets[key]:
+                report["status"] = "ERROR"
+    if metrics:
+        report["resources"] = {"metrics": metrics}
+
+
+def relative_resources(scripts, path, contract, candidate_dir, report, isolated):
+    ratios = contract.get("relative_budget", {})
+    if not ratios:
         return
-    command = [scripts / "dl-profile", *options, "resources", "--", *contract["benchmark"]["candidate"]]
-    with (path.parent / contract["workload"]).open("rb") as workload:
-        trial = subprocess.run(command, stdin=workload, stdout=subprocess.PIPE,
-                               cwd=candidate_dir or path.parent)
-    resource_report = json.loads(trial.stdout)
-    report["resources"] = resource_report
-    if trial.returncode:
-        report["status"] = "ERROR" if resource_report["status"] == "ERROR" else "NOT VERIFIED"
+    keys = RESOURCE_KEYS | PMU | LOAD | ALLOCATIONS
+    if not ratios.keys() <= keys:
+        raise ValueError("unknown relative metric")
+    from growth_models import median_interval
+
+    spec = contract["benchmark"]
+    series = {key: [] for key in ratios}
+    for repetition in range(9):
+        pair = {}
+        for name in ("baseline", "candidate") if repetition % 2 == 0 else ("candidate", "baseline"):
+            budgets = {key: 0 if key.startswith("min_") else sys.float_info.max for key in ratios}
+            command = {**spec, "candidate": spec[name], "candidate_files": spec.get(name + "_files")}
+            leg = {**contract, "benchmark": command, "budget": budgets}
+            output = {}
+            enforce_resources(
+                scripts, path, leg, candidate_dir if name == "candidate" else path.parent, output, isolated
+            )
+            pair[name] = output["resources"]["metrics"]
+        for key in ratios:
+            if pair["baseline"][key] <= 0:
+                raise ValueError(f"zero baseline for {key}")
+            series[key].append(pair["candidate"][key] / pair["baseline"][key])
+    report["relative"] = {}
+    for key, values in series.items():
+        interval = median_interval(values, 1 - 0.05 / len(ratios))
+        limit = ratios[key]
+        if interval is None:
+            verdict = "INCONCLUSIVE"
+        elif key.startswith("min_"):
+            verdict = (
+                "VERIFIED"
+                if interval[0] >= limit
+                else "PERFORMANCE REGRESSION"
+                if interval[1] < limit
+                else "INCONCLUSIVE"
+            )
+        else:
+            verdict = (
+                "VERIFIED"
+                if interval[1] <= limit
+                else "PERFORMANCE REGRESSION"
+                if interval[0] > limit
+                else "INCONCLUSIVE"
+            )
+        report["relative"][key] = dict(ratios=values, interval=interval, limit=limit, status=verdict)
+        if verdict == "PERFORMANCE REGRESSION" or report["status"] == "VERIFIED":
+            report["status"] = verdict
 
 
-def run(path, candidate_dir):
+def run(path, candidate_dir, isolated=False):
     scripts = Path(__file__).resolve().parent
     contract = json.loads(path.read_bytes())
     subprocess.run([scripts / "dl-contract", path], stdout=sys.stderr, check=True)
+    if "scaling" in contract and not any(
+        contract["scaling"].get(k) for k in ("expected_models", "requirements", "growth_limits")
+    ):
+        raise ValueError("declare at least one scaling acceptance criterion for a gate")
     spec = contract["benchmark"]
     budgets = contract["budget"]
-    if set(budgets) - RESOURCE_KEYS - {"wall_time_regression_fraction", "max_wall_ratio"}:
+    if (
+        set(budgets)
+        - RESOURCE_KEYS
+        - PMU
+        - LOAD
+        - ALLOCATIONS
+        - {"wall_time_regression_fraction", "max_wall_ratio"}
+    ):
         raise ValueError("contract contains a budget this runner cannot verify")
-    tolerance = budgets["wall_time_regression_fraction"]
-    ceiling = min(1 + tolerance, budgets.get("max_wall_ratio", math.inf))
-    args = [scripts / "dl-perf", "--input", contract["workload"], "--expected", spec["expected"],
-            "--build", contract["build"], "--tolerance", str(tolerance)]
-    if candidate_dir:
-        args.extend(("--candidate-dir", str(candidate_dir.resolve())))
-    for key in ("baseline", "candidate"):
-        argv = spec[key]
-        if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
-            raise ValueError(f"{key} must be a nonempty argv array")
-        args.extend(("--" + key, shlex.join(argv)))
-    trial = subprocess.run(args, cwd=path.parent, stdout=subprocess.PIPE, check=False)
-    report = json.loads(trial.stdout)
-    if trial.returncode == 0:
-        low, high = report["interval"]
-        if low > ceiling:
-            report["status"] = "PERFORMANCE REGRESSION"
-        elif high > ceiling:
-            report["status"] = "INCONCLUSIVE"
+    isolated = isolated or candidate_dir is not None or bool(spec.get("oracle", {}).get("state_files"))
+    ceiling = None
+    if budgets.keys() & {"wall_time_regression_fraction", "max_wall_ratio"}:
+        tolerance = budgets.get("wall_time_regression_fraction", max(0, budgets.get("max_wall_ratio", 1) - 1))
+        ceiling = min(1 + tolerance, budgets.get("max_wall_ratio", math.inf))
+        args = [
+            scripts / "dl-perf",
+            "--input",
+            contract["workload"],
+            "--expected",
+            spec["expected"],
+            "--build",
+            contract["build"],
+            "--tolerance",
+            str(tolerance),
+        ]
+        if isolated:
+            args.extend(
+                [
+                    "--isolated",
+                    "--file-lists",
+                    json.dumps([spec.get("baseline_files"), spec.get("candidate_files")]),
+                ]
+            )
+        args.extend(["--oracle-json", json.dumps(spec.get("oracle", {}))])
+        if candidate_dir:
+            args.extend(("--candidate-dir", str(candidate_dir.resolve())))
+        for key in ("baseline", "candidate"):
+            argv = spec[key]
+            if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+                raise ValueError(f"{key} must be a nonempty argv array")
+            args.extend(("--" + key, shlex.join(argv)))
+        trial = subprocess.run(args, cwd=path.parent, stdout=subprocess.PIPE, check=False)
+        report = json.loads(trial.stdout)
+        if report["status"] in ("VERIFIED", "INCONCLUSIVE", "PERFORMANCE REGRESSION"):
+            low, high = report["interval"]
+            if low > ceiling:
+                report["status"] = "PERFORMANCE REGRESSION"
+            elif high <= ceiling:
+                report["status"] = "VERIFIED"
+            else:
+                report["status"] = "INCONCLUSIVE"
+    else:
+        from correctness import checked_run, inputs
+
+        cwd = candidate_dir or path.parent
+        cmd = spec["candidate"]
+        checked_run(
+            cwd,
+            inputs(cwd, cmd, spec.get("candidate_files")),
+            cmd,
+            (path.parent / contract["workload"]).read_bytes(),
+            (path.parent / spec["expected"]).read_bytes(),
+            spec.get("oracle", {}),
+            path.parent,
+            time.monotonic() + 30,
+            512,
+        )
+        report = {
+            "status": "VERIFIED",
+            "input_sha256": hashlib.sha256((path.parent / contract["workload"]).read_bytes()).hexdigest(),
+        }
     if report["status"] == "VERIFIED":
-        enforce_resources(scripts, path, contract, candidate_dir, report)
+        enforce_resources(scripts, path, contract, candidate_dir, report, isolated)
+    if report["status"] == "VERIFIED":
+        relative_resources(scripts, path, contract, candidate_dir, report, isolated)
+    if report["status"] == "VERIFIED" and "scaling" in contract:
+        from scaling import experiment, decision
+
+        evidence = experiment(path, contract, candidate_dir)
+        report["scaling"] = evidence
+        verdict = decision(evidence, contract["scaling"])
+        if verdict:
+            report["status"] = "PERFORMANCE REGRESSION" if verdict == 1 else evidence["status"]
     report.update(contract=str(path), max_wall_ratio=ceiling)
     print(json.dumps(report))
     return {"VERIFIED": 0, "PERFORMANCE REGRESSION": 1, "ERROR": 1}.get(report["status"], 2)
@@ -65,11 +300,18 @@ def run(path, candidate_dir):
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:] == ["--changed"]:
+            from changed_contracts import check
+
+            evidence = check()
+            print(json.dumps(evidence))
+            sys.exit(0 if evidence["status"] in ("VERIFIED", "NOT APPLICABLE") else 2)
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument("contract", type=Path)
         parser.add_argument("--candidate-dir", type=Path)
+        parser.add_argument("--isolated", action="store_true")
         args = parser.parse_args()
-        sys.exit(run(args.contract.resolve(), args.candidate_dir))
+        sys.exit(run(args.contract.resolve(), args.candidate_dir, args.isolated))
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
         sys.exit(2)

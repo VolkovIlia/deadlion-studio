@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Start/resume OMP native autoresearch in an independent disposable clone."""
+
 import argparse
 import fcntl
 import json
 import os
 from pathlib import Path
+import shutil
+import sys
 import subprocess
 import time
 
@@ -17,21 +20,62 @@ def new_workspace(directory, args):
     if args.memory_mib < 1 or not 1 <= args.cpu_percent <= 10000:
         raise ValueError("invalid MemoryMax or CPUQuota")
     source = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-    common = Path(subprocess.check_output(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True).strip())
+    common = Path(
+        subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True
+        ).strip()
+    )
     check = args.check.resolve() if args.check else None
-    if not check or not check.is_relative_to(source) or not check.is_file() or not os.access(check, os.X_OK):
+    contracts = [p.resolve() for p in (args.contract, args.holdout_contract) if p]
+    if contracts and (check or len(set(contracts)) != 2 or not all(p.is_file() for p in contracts)):
+        raise ValueError("provide two distinct approved contracts for training and holdout")
+    if not contracts and (
+        not check or not check.is_relative_to(source) or not check.is_file() or not os.access(check, os.X_OK)
+    ):
         raise ValueError("supply --check with a trusted executable in the source tree")
     revision = subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], text=True).strip()
     directory.mkdir(mode=0o700)
     repo = directory / "repo"
-    subprocess.run(["git", "clone", "--local", "--no-hardlinks", "--no-checkout",
-                    ".", str(repo)], check=True)
+    subprocess.run(["git", "clone", "--local", "--no-hardlinks", "--no-checkout", ".", str(repo)], check=True)
     subprocess.run(["git", "-C", repo, "remote", "remove", "origin"], check=True)
     subprocess.run(["git", "-C", repo, "checkout", "-b", "autoresearch/deadlion", revision], check=True)
-    limits = dict(source=str(source), common=str(common), check=str(check), goal=args.goal, iterations=args.iterations, revision=revision,
-                  memory_mib=args.memory_mib, cpu_percent=args.cpu_percent, tokens=args.tokens, patience=args.patience,
-                  deadline=int(time.time() * 1000) + args.seconds * 1000)
+    candidate_files = args.candidate_file or ["candidate"]
+    for name in candidate_files:
+        p = repo / name
+        if (
+            not p.is_file()
+            or p.resolve() != p
+            or Path(name).is_absolute()
+            or any(part.startswith(".") for part in Path(name).parts)
+            or name in {"autoresearch.sh", str(check.relative_to(source)) if check else ""}
+        ):
+            raise ValueError(f"invalid editable candidate file: {name}")
+    harness = repo / "autoresearch.sh"
+    if harness.is_symlink() or (not contracts and not harness.is_file()):
+        raise ValueError("supply a checked-in autoresearch.sh")
+    if not contracts:
+        shutil.copyfile(harness, directory / "harness")
+    if check:
+        shutil.copyfile(check, directory / "oracle")
+        (directory / "oracle").chmod(0o500)
+    (directory / "profile").mkdir()
+    shim = harness
+    shim.write_text('exec /usr/bin/python3 -I "$DL_HELPER" benchmark\n')
+    limits = dict(
+        contracts=list(map(str, contracts)),
+        candidate_files=candidate_files,
+        source=str(source),
+        common=str(common),
+        check=str(check),
+        goal=args.goal,
+        iterations=args.iterations,
+        revision=revision,
+        memory_mib=args.memory_mib,
+        cpu_percent=args.cpu_percent,
+        tokens=args.tokens,
+        patience=args.patience,
+        deadline=int(time.time() * 1000) + args.seconds * 1000,
+    )
     (directory / "limits.json").write_text(json.dumps(limits))
 
 
@@ -41,30 +85,113 @@ def launch(directory, pause_after):
     if remaining < 1 or (directory / "completed").exists():
         raise ValueError("experiment budget exhausted")
     extension = Path(__file__).resolve().with_name("evolution.mjs")
-    env = {**os.environ, "DL_EXPERIMENT": str(directory),
-           "DL_PAUSE_AFTER": str(pause_after), "OMP_AUTORESEARCH_DB_DIR": str(directory / "history")}
-    supervisor = extension.with_name("experiment-rpc.py")
-    readonly = [limits["source"], limits["common"], str(directory / "limits.json"),
-                str(supervisor.parent)]
-    mounts = [arg for path in readonly for arg in ("--ro-bind", path, path)]
-    command = ["systemd-run", "--user", "--scope", "--quiet",
-               f"--property=MemoryMax={limits['memory_mib']}M",
-               f"--property=CPUQuota={limits['cpu_percent']}%", "--", "timeout", "--kill-after=5", str(remaining),
-               "bwrap", "--die-with-parent", "--bind", "/", "/", "--dev", "/dev", *mounts, "--unsetenv", "SSH_AUTH_SOCK",
-               "--", "python3", str(supervisor)]
-    return subprocess.run(command, env=env, cwd=directory / "repo").returncode
+    sys.path.insert(0, str(extension.parents[1] / "skills/performance/scripts"))
+    from candidate_runner import runtime
+
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k.endswith("_API_KEY") or k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))
+    }
+    env.update(
+        PATH="/usr/local/bin:/usr/bin:/bin",
+        HOME="/tmp/home",
+        SHELL="/bin/bash",
+        DL_EXPERIMENT=str(directory),
+        DL_PAUSE_AFTER=str(pause_after),
+        DL_HELPER=str(extension.with_name("candidate.py")),
+        PI_CODING_AGENT_DIR="/profile",
+        OMP_AUTORESEARCH_DB_DIR=str(directory / "history"),
+    )
+    profile = Path(os.environ.get("PI_CODING_AGENT_DIR", Path.home() / ".omp/agent"))
+    mounts = []
+    for name in ("models.yml", "config.yml"):
+        if (profile / name).is_file():
+            mounts += ["--ro-bind", str(profile / name), "/profile/" + name]
+    for path in ("/etc/ssl", "/etc/pki", "/etc/resolv.conf", "/etc/hosts", "/etc/passwd", "/etc/group"):
+        if Path(path).exists():
+            mounts += ["--ro-bind", path, path]
+    omp = shutil.which("omp")
+    if not omp:
+        raise ValueError("OMP missing")
+    # Trusted OMP can contact its provider. Candidate namespaces start from an empty root.
+    command = [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--quiet",
+        f"--property=MemoryMax={limits['memory_mib']}M",
+        f"--property=CPUQuota={limits['cpu_percent']}%",
+        "--property=TasksMax=128",
+        "--",
+        "timeout",
+        "--kill-after=1",
+        str(remaining),
+        "bwrap",
+        "--die-with-parent",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--clearenv",
+        *runtime(),
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--dir",
+        "/tmp/home",
+        "--bind",
+        str(directory / "profile"),
+        "/profile",
+        "--bind",
+        str(directory),
+        str(directory),
+        "--ro-bind",
+        str(extension.parent),
+        str(extension.parent),
+        "--ro-bind",
+        str(extension.parents[1] / "skills/performance/scripts"),
+        str(extension.parents[1] / "skills/performance/scripts"),
+        "--ro-bind",
+        omp,
+        "/usr/local/bin/omp",
+        *mounts,
+        *[item for k, v in env.items() for item in ("--setenv", k, v)],
+        "--chdir",
+        str(directory / "repo"),
+        "--",
+        "/usr/bin/python3",
+        str(extension.with_name("experiment-rpc.py")),
+    ]
+    from contract_evaluator import evaluator, experiment_slice
+
+    with experiment_slice(limits) as unit, evaluator(directory, limits, unit):
+        command.insert(2, "--slice=" + unit)
+        return subprocess.run(command, cwd=directory / "repo").returncode
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workspace", type=Path)
     parser.add_argument("--goal")
+    parser.add_argument(
+        "--candidate-file", action="append", help="editable tracked file, repeatable (default candidate)"
+    )
+    parser.add_argument("--contract", type=Path, help="approved optimization contract")
+    parser.add_argument("--holdout-contract", type=Path, help="independent acceptance contract")
     parser.add_argument("--check", type=Path, help="trusted correctness and budget evaluator")
     parser.add_argument("--iterations", type=int, default=4)
     parser.add_argument("--seconds", type=int, default=300)
-    parser.add_argument("--tokens", type=int, default=0, help="stop at reported foreground token usage (0 disables)")
-    parser.add_argument("--require-hard-token-cap", action="store_true",
-                        help="refuse launch unless provider-level token enforcement is available")
+    parser.add_argument(
+        "--tokens", type=int, default=0, help="stop at reported foreground token usage (0 disables)"
+    )
+    parser.add_argument(
+        "--require-hard-token-cap",
+        action="store_true",
+        help="refuse launch unless provider-level token enforcement is available",
+    )
     parser.add_argument("--patience", type=int, default=3, help="stop after consecutive discarded runs")
     parser.add_argument("--memory-mib", type=int, default=2048)
     parser.add_argument("--cpu-percent", type=int, default=100)
@@ -77,8 +204,11 @@ def main():
         parser.error("pause-after must be nonnegative")
     directory = args.workspace.resolve()
     if not args.resume:
-        if directory.is_relative_to(Path(subprocess.check_output(
-                ["git", "rev-parse", "--show-toplevel"], text=True).strip()).resolve()):
+        if directory.is_relative_to(
+            Path(
+                subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+            ).resolve()
+        ):
             parser.error("create the experiment outside the source tree")
         new_workspace(directory, args)
     with (directory / "lock").open("a") as lock:

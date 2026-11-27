@@ -1,0 +1,126 @@
+{
+  "mode": "Research",
+  "problem": "Count matching membership probes",
+  "input_dimensions": "n keys and q probes",
+  "scale": "Independent n and q",
+  "distribution": "Uniform shuffled keys or repeated keys; uniform random probes",
+  "constraints": "Deterministic exact integer count",
+  "alternatives": [
+    {
+      "algorithm": "scan",
+      "time": "O(nq) worst case",
+      "space": "O(n) list",
+      "assumptions": "Unsorted list and equality takes constant time"
+    },
+    {
+      "algorithm": "index",
+      "time": "O(n+q) expected",
+      "space": "O(n) hash table",
+      "assumptions": "Bounded integer hashing cost and well-distributed hashes"
+    }
+  ],
+  "choice": "index",
+  "invariant": "After processing k probes, the count equals the number of hits in the first k",
+  "oracle": "Reference sums probe multiplicities over distinct present keys; fixed input expects one hit.",
+  "workload": "input",
+  "build": "Same CPython interpreter for both commands",
+  "budget": {
+    "wall_time_regression_fraction": 0.5,
+    "max_wall_ratio": 1.5,
+    "peak_rss_kib": 98304
+  },
+  "benchmark": {
+    "baseline": [
+      "python3",
+      "scan.py"
+    ],
+    "candidate": [
+      "python3",
+      "indexed.py"
+    ],
+    "expected": "expected"
+  },
+  "verify": "Run dl-perf with scan.py, indexed.py, input and expected",
+  "computational_model": "Integer equality with bounded integer keys",
+  "lower_bound": "Read input keys and probes in the streaming input format",
+  "scaling": {
+    "dimensions": {
+      "n": [
+        128,
+        512,
+        2048,
+        8192
+      ],
+      "q": [
+        32,
+        256,
+        1024
+      ]
+    },
+    "distributions": [
+      "uniform",
+      "duplicates"
+    ],
+    "generator": [
+      "python3",
+      "generate.py"
+    ],
+    "implementations": {
+      "index": {
+        "argv": [
+          "python3",
+          "indexed.py"
+        ],
+        "files": [
+          "indexed.py"
+        ]
+      },
+      "scan": {
+        "argv": [
+          "python3",
+          "scan.py"
+        ],
+        "files": [
+          "scan.py"
+        ]
+      }
+    },
+    "limits": {
+      "seconds": 160,
+      "memory_mib": 128,
+      "max_points": 24
+    },
+    "seed": 441,
+    "min_repetitions": 11,
+    "model_tolerance": 0.2,
+    "models": [
+      "constant",
+      "n",
+      "q",
+      "n+q",
+      "n*q"
+    ],
+    "requirements": [
+      {
+        "implementation": "index",
+        "metric": "peak_rss_kib",
+        "max": 65536
+      }
+    ],
+    "growth_limits": [
+      {
+        "implementation": "index",
+        "metric": "wall_ns",
+        "from": {
+          "n": 2048,
+          "q": 1024
+        },
+        "to": {
+          "n": 8192,
+          "q": 1024
+        },
+        "max_ratio": 4
+      }
+    ]
+  }
+}

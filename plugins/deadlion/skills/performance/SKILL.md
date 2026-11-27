@@ -24,6 +24,6 @@ For CPU hotspots inspect samples before selecting available counters. Evaluate S
 
 Run scripts/dl-analyze --changed from the target Git root using the executable inside this skill. For Python source returned in chat, pipe the draft to scripts/dl-analyze --stdin-name draft.py. Use --help for CLI flags.
 
-For Performance and Research run scripts/dl-contract on the plan contract and scripts/dl-perf against the trusted baseline. Use scripts/dl-profile when a CPU, memory or PMU metric answers the question. Read references/commands.md for workload setup, profiling, evidence interpretation or OMP Evolution.
+For Performance and Research run scripts/dl-contract on the plan contract and scripts/dl-perf against the trusted baseline. For scaling contracts run scripts/dl-perf scale CONTRACT and scripts/dl-perf-gate CONTRACT. Keep the raw JSON outside agent context. Use scripts/dl-profile when a CPU, memory or PMU metric answers the question. Read references/commands.md for workload setup, profiling, evidence interpretation or OMP Evolution.
 
 For profiling choices and limitations by symptom and language, read references/investigation.md.

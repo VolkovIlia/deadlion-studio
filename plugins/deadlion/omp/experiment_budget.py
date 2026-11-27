@@ -33,6 +33,9 @@ class ExperimentBudget:
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(self.state))
         temporary.replace(self.path)
+        return self.exhausted()
+
+    def exhausted(self):
         if self.limits["tokens"] and self.state["tokens"] >= self.limits["tokens"]:
             return "reported foreground token budget reached"
         if self.state["rejected"] >= self.limits["patience"]:

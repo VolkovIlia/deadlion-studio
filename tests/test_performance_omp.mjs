@@ -10,7 +10,7 @@ test("edit feedback contains a real Ruff diagnostic", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "dl-edit-"));
   await writeFile(join(cwd, "example.py"), "for k, v in table.items():\n    print(v)\n");
   let handler;
-  performance({ on(name, fn) { assert.equal(name, "tool_result"); handler = fn; } });
+  performance({ on(name, fn) { if (name === "tool_result") handler = fn; } });
   const result = await handler({ toolName: "edit", input: { path: "example.py" }, content: [] }, { cwd });
   assert.match(result.content[0].text, /PERF102/);
 });
@@ -44,4 +44,19 @@ test("independent verifier can reject a keep even with a claimed improvement", a
   const verdict = await handler({ toolName: "log_experiment", input: { status: "keep", metric: 1 } }, { cwd });
   assert.equal(verdict.block, true);
   assert.match(verdict.reason, /verifier rejected/);
+});
+
+
+test("an explicitly required missing gate blocks the OMP stop event", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "dl-stop-"));
+  process.env.DL_PERF_CONTRACT = join(cwd, "missing.json");
+  const handlers = {};
+  try {
+    performance({ on(name, fn) { handlers[name] = fn; } });
+    const result = await handlers.session_stop({}, { cwd });
+    assert.equal(result.decision, "block");
+    assert.match(result.reason, /NOT VERIFIED/);
+  } finally {
+    delete process.env.DL_PERF_CONTRACT;
+  }
 });

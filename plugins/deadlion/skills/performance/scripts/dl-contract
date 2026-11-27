@@ -36,6 +36,28 @@ def validate(record):
             type(v) not in (float, int) or not 0 <= v < float("inf") for v in budget.values()):
         raise ValueError("supply finite nonnegative resource budgets with units in their keys")
 
+    if record.get("ci_inconclusive","required") not in ("advisory","required"):
+        raise ValueError("ci_inconclusive must be advisory or required")
+    if "benchmark" in record:
+        from correctness import argv
+        spec = record["benchmark"]
+        argv(spec["candidate"])
+        argv(spec["baseline"])
+        if not isinstance(spec.get("expected"),str) or not spec["expected"]:
+            raise ValueError("declare trusted expected output")
+        root = Path(spec.get("candidate_root","."))
+        if root.is_absolute() or ".." in root.parts:
+            raise ValueError("candidate_root must stay in the candidate checkout")
+    relative = record.get("relative_budget", {})
+    if not isinstance(relative, dict) or any(type(v) not in (int,float) or not 0<=v<float("inf") for v in relative.values()):
+        raise ValueError("relative_budget requires finite nonnegative candidate/baseline ratios")
+    if "scaling" in record:
+        from scaling import validate as validate_scaling
+        validate_scaling(record["scaling"])
+    if "oracle" in record.get("benchmark", {}):
+        from correctness import validate as validate_oracle
+        validate_oracle(record["benchmark"]["oracle"])
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
@@ -43,7 +65,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         validate(json.loads(args.contract.read_text()))
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, KeyError, TypeError, SyntaxError, ArithmeticError, AttributeError) as error:
         print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
         sys.exit(2)
     print(json.dumps(dict(status="CHECKED", scope="contract structure")))

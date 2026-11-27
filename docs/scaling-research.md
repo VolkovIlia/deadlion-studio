@@ -1,0 +1,40 @@
+# Tool selection for 4.4.0
+
+Repository HEADs and license files were inspected on 2026-11-28 Moscow time. Revisions below identify the evaluated source. Runtime integrations and upstream capabilities are recorded separately. No external implementation was copied into the plugin.
+
+| Project and revision | License for the relevant upstream project | Capability and use |
+|---|---|---|
+| [Infer ec62d9a](https://github.com/meta/infer/tree/ec62d9aa765b) | MIT | Cost infers symbolic resource bounds from captured code under its library models. The Java adapter performs a fresh capture and reads costs-report.json. |
+| [LLVM e9329e7](https://github.com/llvm/llvm-project/tree/e9329e776de0) | Apache-2.0 with LLVM exceptions, see component notices | Clang-Tidy can identify expensive copies using C++ types. clangd serves editor diagnostics through existing LSP integration. |
+| [Google Benchmark 48ece68](https://github.com/google/benchmark/tree/48ece68f18ff) | Apache-2.0 | Repeated C++ benchmarks, complexity fitting over supplied sizes, counters and JSON. Its complexity coefficient and RMS summarize a fit to the supplied workload. Use an existing in-process benchmark to investigate a hot kernel. |
+| [Criterion.rs 3dbc6c6](https://github.com/bheisler/criterion.rs/tree/3dbc6c618acb) | MIT or Apache-2.0 | Rust microbenchmarks with warmup, sampling, bootstrap estimates, baselines and throughput. Keep Criterion fixtures for fine-grained Rust timings. |
+| [pyperf 5d1ee0d](https://github.com/psf/pyperf/tree/5d1ee0dd5aaa) | MIT | Worker-process calibration, repetitions, metadata and comparison of benchmark files. Useful for Python interpreter startup and noise investigations. |
+| [asv 1f9db13](https://github.com/airspeed-velocity/asv/tree/1f9db1375582) | BSD-3-Clause | Parameterized benchmarks across revisions and environments, historical regression detection. A change over commits and a change of slope over input sizes answer different questions. |
+| [hyperfine c516152](https://github.com/sharkdp/hyperfine/tree/c51615249805) | MIT or Apache-2.0 | Command timing, parameter sweeps, warmups and export. Retain for quick local timing. |
+| [eth-sri/complexity](https://github.com/eth-sri/complexity) | Unknown | Both the supplied repository URL and GitHub API returned 404. No license, supported analyzer or integration could be established at this address. |
+| [OpenEvolve 2239f87](https://github.com/algorithmicsuperintelligence/openevolve/tree/2239f871087d) | Apache-2.0 | Population-based evolutionary search with evaluator feedback. OMP already owns search and checkpoints. |
+| [SkyDiscover 0d932b6](https://github.com/skydiscover-ai/skydiscover/tree/0d932b690670) | Apache-2.0 | Search strategies and evaluation for algorithm discovery. Its optimizer and storage would duplicate native OMP responsibilities. |
+| [ESA 5ed859e](https://github.com/YashaPushak/ESA/tree/5ed859e) | BSD-3-Clause | Numerical fitting, bootstrap, held-out larger instances, customizable models and reporting. Tested its numerical kernel separately. |
+| [Extra-P 9296fbd](https://github.com/tuda-hpclab/extrap/tree/9296fbd) | BSD-3-Clause | Empirical one- and multi-parameter model generation. Optional downstream modeler via the native JSON Lines format. |
+
+The new CLI owns independent oracles, comparable input bytes, process isolation, resource limits and gate status. It exposes a small default predictive check using the Python standard library. Kernel benchmarks with an existing harness can implement a trusted workload adapter. The measured command boundary must be recorded when comparing their results.
+
+## Method probes
+
+On exact synthetic data, ESA's `userDefinitions.fitModelLS(x,y,"poly")` fitted `3*n**2` using integers 2 through 25. Its maximum relative prediction error on 26 through 31 was 1.04e-13 rounded upward. Its fitted exponent was 1.9999999999999412. This probe exercised the fitting kernel. The one-input-size interface in this kernel cannot express two independent axes directly. Extra-P's CLI fitted the same univariate curve with a quadratic coefficient of 2.9999999999999987. For the full Cartesian product of integers 2 through 7, Extra-P reconstructed `7+n*q` with intercept 7.000000000000003 and product coefficient 0.9999999999999994. Neither upstream package is required for normal Deadlion runs.
+
+Reproduce with a temporary Python 3.12 environment, the two revisions above, and Extra-P's text reader. Declare PARAMETER for each axis, POINTS for each tuple, one REGION and METRIC, then DATA rows with two copies of each exact value. Run `extrap --disable-progress --print functions --text input.txt`. For Deadlion's measured cohorts, export using `dl-perf scale CONTRACT --replay REPORT --extrap measurements.jsonl`, then run `extrap --json measurements.jsonl`. Sparse designs may be insufficient for an upstream modeler.
+
+Hoos evaluates fitted models against held-out problem sizes and uses bootstrap confidence intervals. Extra-P studies model identifiability and sparse multi-parameter sampling. Deadlion holds out whole coordinates and uses median pairwise slopes, fixed confirmation repetitions after adaptive exploration, distribution-free median intervals and held-out residuals. A log-log exponent is descriptive when startup, phase changes or additive terms are present. AIC/BIC need a justified error likelihood, a common observation scale and an appropriate effective sample size. Repeating a command on the same instance does not establish independent data for those criteria. Recurrence solving and symbolic resource analysis belong with a derivation or specialized analyzer, with its cost model and input assumptions attached. [Hoos](https://www.cs.ubc.ca/~hoos/Publ/Hoos09.pdf) · [ESA publications](https://www.cs.ubc.ca/~w-esa/ESA/) · [Extra-P research](https://doi.org/10.3389/fhpcp.2025.1714042) · [Infer Cost](https://fbinfer.com/docs/checker-cost/)
+
+## Semantic analysis and external tasks
+
+Clippy and rust-analyzer both offer MIT or Apache-2.0. Use project-local Cargo/Clippy and the harness's existing language server. Staticcheck uses MIT, with additional third-party notices. PMD carries a BSD-style license with an acknowledgment clause. Detekt uses Apache-2.0. Project-aware adapters run on explicit native review. JavaScript and TypeScript use the project's configured ESLint rules. Type information depends on that configuration. Ordinary post-edit checks require neither project compilation nor a second language server. [Clippy 6a58c25](https://github.com/rust-lang/rust-clippy/tree/6a58c2590580) · [rust-analyzer efc6ca7](https://github.com/rust-lang/rust-analyzer/tree/efc6ca74690b) · [Staticcheck 8371db7](https://github.com/dominikh/go-tools/tree/8371db75e9da) · [PMD 007f6e8](https://github.com/pmd/pmd/blob/007f6e8fe12d/LICENSE) · [Detekt 72e93bc](https://github.com/detekt/detekt/tree/72e93bc5967f)
+
+| Task source | Compatibility assessment |
+|---|---|
+| [EvalPlus 26d6d00](https://github.com/evalplus/evalplus/tree/26d6d00bb1fd) | Apache-2.0 harness with extended Python correctness tests and EvalPerf efficiency tasks. Use approved task-level generators and graders. Existing input tests alone do not supply a scaling axis. |
+| [EffiBench-X 21b6668](https://github.com/EffiBench/EffiBench-X/tree/21b6668a49a3) | The supplied EffiBench/EffiBench URL returned 404. The available X project uses an Apache-2.0 evaluator, an MIT sandbox component, a separate Hugging Face dataset and Docker. Select a bounded CPU task and verify the dataset's terms before importing fixtures. |
+| [Frontier-CS 61bfa6d](https://github.com/FrontierCS/Frontier-CS/tree/61bfa6dd95ca) | The supplied OpenBMB URL returned 404. The FrontierCS repository has an MIT project license and task-specific research graders, including nbody_simulation and symbolic_regression. Inspect each task's environment, grader and third-party material before reuse. GPU-specific tasks require an appropriate runner. |
+
+No scores for these external suites are reported here. The local agent comparison uses the previously reviewed Deadlion solutions under their fixed grader.

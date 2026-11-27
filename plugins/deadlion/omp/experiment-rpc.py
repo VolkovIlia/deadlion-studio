@@ -23,9 +23,13 @@ def events(stream):
 
 def supervise(directory, limits):
     command = ["omp", "--mode", "rpc", "--offline", "--no-extensions", "--no-judge",
-               "--no-spotlight", "-e", str(Path(__file__).with_name("evolution.mjs"))]
-    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+               "--no-spotlight", "--no-lsp", "--no-skills", "--tools",
+               "candidate_shell,init_experiment,run_experiment,log_experiment", "-e", str(Path(__file__).with_name("evolution.mjs"))]
     budget = ExperimentBudget(directory, limits)
+    if reason := budget.exhausted():
+        (directory / "completed").write_text(reason+"\n")
+        return 0
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     logged = 0
     pause_after = int(os.environ.get("DL_PAUSE_AFTER", 0))
     try:
@@ -40,7 +44,7 @@ def supervise(directory, limits):
                 request(process, "enable", "/autoresearch")
             elif kind == "prompt_result" and event.get("id") == "enable":
                 request(process, "experiment", f"{limits['goal']}. Set max_iterations={limits['iterations']}. "
-                        "Use the fixed workload and independent verifier. Log each result.")
+                        f"Use primary metric cost, lower is better. Edit {limits['candidate_files']} with candidate_shell. Use the fixed workload and independent verifier. Log each result.")
             elif kind == "extension_ui_request" and event.get("method") == "notify":
                 print(event.get("message"), flush=True)
             elif kind == "tool_execution_end":

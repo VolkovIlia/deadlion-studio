@@ -1,0 +1,759 @@
+{
+  "allocations": {
+    "code": 0,
+    "report": {
+      "status": "VERIFIED",
+      "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+      "resources": {
+        "metrics": {
+          "allocation_count": 95,
+          "allocated_bytes": 1004032
+        }
+      },
+      "contract": "/tmp/tmpolqvmgdi/contract.json",
+      "max_wall_ratio": null
+    },
+    "wall_ns": 320195851
+  },
+  "zero_allocations": {
+    "code": 1,
+    "report": {
+      "status": "ERROR",
+      "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+      "resources": {
+        "metrics": {
+          "allocation_count": 95
+        }
+      },
+      "contract": "/tmp/tmpolqvmgdi/contract.json",
+      "max_wall_ratio": null
+    },
+    "wall_ns": 311671319
+  },
+  "pmu": {
+    "code": 2,
+    "report": {
+      "status": "NOT VERIFIED",
+      "reason": "Command '[PosixPath('/home/volk/vibeprojects/deadlion-studio/plugins/deadlion/skills/performance/scripts/dl-profile'), 'pmu', '--', 'python3', 'indexed.py']' returned non-zero exit status 2."
+    },
+    "wall_ns": 134204120
+  },
+  "latency": {
+    "code": 0,
+    "report": {
+      "status": "VERIFIED",
+      "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+      "latency_intervals_ns": {
+        "latency_p99_ns": [
+          15203677,
+          16396378
+        ]
+      },
+      "resources": {
+        "metrics": {
+          "latency_p99_ns": 15536034,
+          "min_requests_per_second": 83.9216163741116
+        }
+      },
+      "contract": "/tmp/tmpolqvmgdi/contract.json",
+      "max_wall_ratio": null
+    },
+    "wall_ns": 12080576530
+  },
+  "relative_rss": {
+    "code": 0,
+    "report": {
+      "status": "VERIFIED",
+      "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+      "resources": {
+        "metrics": {
+          "peak_rss_kib": 15672
+        }
+      },
+      "relative": {
+        "peak_rss_kib": {
+          "ratios": [
+            0.9862189927336508,
+            1.0050942435048396,
+            0.9770318021201413,
+            0.992422328870927,
+            1.002073613271125,
+            1.0101240192356364,
+            0.9622926093514329,
+            1.0315350534271566,
+            1.0186939820742638
+          ],
+          "interval": [
+            0.9770318021201413,
+            1.0186939820742638
+          ],
+          "limit": 3,
+          "status": "VERIFIED"
+        }
+      },
+      "contract": "/tmp/tmpolqvmgdi/contract.json",
+      "max_wall_ratio": null
+    },
+    "wall_ns": 1760909779
+  },
+  "cpp": {
+    "code": 0,
+    "report": {
+      "status": "CHECKED",
+      "scope": "Ruff PERF and Deadlion AST rules",
+      "files": 1,
+      "diagnostics": [
+        {
+          "file": "/tmp/tmpolqvmgdi/copy.cpp",
+          "line": 3,
+          "rule": "performance-for-range-copy",
+          "explanation": "the loop variable's type is not a reference type; this creates a copy in each iteration; consider making this a reference",
+          "confidence": "native diagnostic",
+          "severity": "INFO",
+          "confirm": "Check semantics and compare the affected workload with dl-perf scale."
+        }
+      ],
+      "native_tools": {
+        "clang-tidy": "selected"
+      }
+    },
+    "wall_ns": 152337150
+  },
+  "post_edit_ns": [
+    30586783,
+    26592251,
+    25904910,
+    28731964,
+    25026957,
+    24410169,
+    26437866,
+    24633572,
+    25859247
+  ],
+  "infer_cost": {
+    "status": "CHECKED",
+    "scope": "Ruff PERF and Deadlion AST rules and Infer Cost",
+    "files": 1,
+    "diagnostics": [
+      {
+        "file": "/tmp/dl-infer-release-7gT2/Count.java",
+        "line": 1,
+        "rule": "infer-cost",
+        "explanation": "Count.<init>() O(1)",
+        "confidence": "STATICALLY BOUNDED",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale.",
+        "computational_model": "Infer Cost execution steps on captured Java bytecode",
+        "polynomial": "2",
+        "assumptions": "Modeled calls and inferred loop bounds"
+      },
+      {
+        "file": "/tmp/dl-infer-release-7gT2/Count.java",
+        "line": 2,
+        "rule": "infer-cost",
+        "explanation": "Count.count(int[]):int O(xs.length\u00b2)",
+        "confidence": "STATICALLY BOUNDED",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale.",
+        "computational_model": "Infer Cost execution steps on captured Java bytecode",
+        "polynomial": "12 + 18 \u22c5 xs.length + 13 \u22c5 xs.length\u00b2",
+        "assumptions": "Modeled calls and inferred loop bounds"
+      }
+    ]
+  },
+  "pmu_available": {
+    "code": 0,
+    "report": {
+      "status": "VERIFIED",
+      "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+      "resources": {
+        "metrics": {
+          "cache-misses": 112789.0,
+          "cycles": 75689010.0,
+          "branch-misses": 911422.0,
+          "instructions": 107508249.0
+        }
+      },
+      "contract": "/tmp/tmpj0o2oemr/contract.json",
+      "max_wall_ratio": null
+    }
+  },
+  "pmu_isolated": {
+    "code": 0,
+    "report": {
+      "status": "VERIFIED",
+      "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+      "resources": {
+        "metrics": {
+          "cycles": 57306890.0,
+          "cache-misses": 104714.0,
+          "branch-misses": 629966.0,
+          "instructions": 83677642.0
+        }
+      },
+      "contract": "/tmp/tmpj0o2oemr/contract.json",
+      "max_wall_ratio": null
+    }
+  },
+  "rust": {
+    "status": "CHECKED",
+    "scope": "Ruff PERF and Deadlion AST rules",
+    "files": 1,
+    "diagnostics": [
+      {
+        "file": "/tmp/tmp.QPfsfSFM6v/src/lib.rs",
+        "line": 1,
+        "rule": "clippy::iter_cloned_collect",
+        "explanation": "called `iter().copied().collect()` on a slice to create a `Vec`. Calling `to_vec()` is both faster and more readable",
+        "confidence": "native diagnostic",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale."
+      },
+      {
+        "file": "/tmp/tmp.QPfsfSFM6v/src/lib.rs",
+        "line": 2,
+        "rule": "clippy::useless_vec",
+        "explanation": "useless use of `vec!`",
+        "confidence": "native diagnostic",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale."
+      }
+    ],
+    "native_tools": {
+      "cargo": "selected"
+    }
+  },
+  "startup": [
+    {
+      "direct_ns": 505637,
+      "isolated_ns": 6018292,
+      "dispatch_ns": 58188682
+    },
+    {
+      "direct_ns": 444806,
+      "isolated_ns": 4526686,
+      "dispatch_ns": 54616487
+    },
+    {
+      "direct_ns": 449626,
+      "isolated_ns": 4222108,
+      "dispatch_ns": 50055284
+    },
+    {
+      "direct_ns": 426811,
+      "isolated_ns": 4588050,
+      "dispatch_ns": 49770488
+    },
+    {
+      "direct_ns": 457070,
+      "isolated_ns": 4952244,
+      "dispatch_ns": 45288896
+    },
+    {
+      "direct_ns": 459634,
+      "isolated_ns": 3966921,
+      "dispatch_ns": 57415980
+    },
+    {
+      "direct_ns": 479744,
+      "isolated_ns": 4695314,
+      "dispatch_ns": 46192932
+    },
+    {
+      "direct_ns": 448706,
+      "isolated_ns": 4274369,
+      "dispatch_ns": 57170799
+    },
+    {
+      "direct_ns": 436802,
+      "isolated_ns": 4231211,
+      "dispatch_ns": 49933079
+    },
+    {
+      "direct_ns": 494878,
+      "isolated_ns": 4704586,
+      "dispatch_ns": 48523134
+    },
+    {
+      "direct_ns": 435869,
+      "isolated_ns": 4252313,
+      "dispatch_ns": 45661772
+    }
+  ],
+  "approved_control_local": {
+    "parameters": {
+      "baseline": "python3 scan.py",
+      "candidate": "python3 indexed.py",
+      "input": "input",
+      "expected": "expected",
+      "build": "Same CPython interpreter for both commands",
+      "candidate_dir": "/tmp/tmpxep6tfqr",
+      "runs": 16,
+      "warmups": 1,
+      "timeout": 30,
+      "tolerance": 0.05,
+      "oracle_json": "{}",
+      "isolated": true,
+      "file_lists": "[null, null]"
+    },
+    "revision": "fc1bc6955d2556626369d539ded965c32d2093e3",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i7-12700K",
+    "platform": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "python": "3.14.8 (main, Oct  1 2026, 00:00:00) [GCC 16.2.1 20260819 (Red Hat 16.2.1-2)]",
+    "affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "input_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+    "expected_sha256": "46251acfc71ec25370b9130041437638dd8bb98c6ce57a89d869f39d826358d5",
+    "wall_ns": [
+      [
+        69147087,
+        13827575
+      ],
+      [
+        68987897,
+        17097295
+      ],
+      [
+        69763909,
+        19591804
+      ],
+      [
+        68678501,
+        19548718
+      ],
+      [
+        70740368,
+        18336349
+      ],
+      [
+        68586391,
+        16196488
+      ],
+      [
+        68984389,
+        16479680
+      ],
+      [
+        68027032,
+        19365717
+      ],
+      [
+        70169305,
+        15102293
+      ],
+      [
+        70792870,
+        14527264
+      ],
+      [
+        68333882,
+        14123355
+      ],
+      [
+        68838874,
+        14389521
+      ],
+      [
+        69971841,
+        15920190
+      ],
+      [
+        69443574,
+        14014089
+      ],
+      [
+        69058448,
+        16124744
+      ],
+      [
+        74152279,
+        13825331
+      ]
+    ],
+    "command_inputs": {
+      "/home/volk/vibeprojects/deadlion-studio/plugins/deadlion/evals/indexed-membership/scan.py": "b4b90663f71654bcd3313d93f2147e56c70c1791c3770f2043d86521a263116b",
+      "/tmp/tmpxep6tfqr/indexed.py": "d55a917720a8d277e5dea7b5c085b10406c44f43cf9d250a22dd5565cc7f6b29"
+    },
+    "status": "VERIFIED",
+    "median_ratio": 0.2305084836000587,
+    "interval": [
+      0.2052080103547151,
+      0.2592062992943435
+    ],
+    "resources": {
+      "metrics": {
+        "peak_rss_kib": 15848
+      }
+    },
+    "contract": "/home/volk/vibeprojects/deadlion-studio/plugins/deadlion/evals/indexed-membership/contract.json",
+    "max_wall_ratio": 0.7,
+    "base_sha": "fc1bc6955d2556626369d539ded965c32d2093e3",
+    "candidate_sha": "fc1bc6955d2556626369d539ded965c32d2093e3",
+    "approved_contract": "plugins/deadlion/evals/indexed-membership/contract.json"
+  },
+  "detekt": {
+    "status": "CHECKED",
+    "scope": "Ruff PERF and Deadlion AST rules",
+    "files": 1,
+    "diagnostics": [
+      {
+        "file": "/tmp/deadlion-native44-ALUe/detekt/Probe.kt",
+        "line": 1,
+        "rule": "detekt.performance.ForEachOnRange",
+        "explanation": "Using the forEach method on ranges has a heavy performance cost. Prefer using simple for loops.",
+        "confidence": "native diagnostic",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale."
+      }
+    ],
+    "native_tools": {
+      "detekt": "selected"
+    }
+  },
+  "eslint": {
+    "status": "CHECKED",
+    "scope": "Ruff PERF and Deadlion AST rules",
+    "files": 1,
+    "diagnostics": [
+      {
+        "file": "/tmp/deadlion-native44-ALUe/eslint/probe.ts",
+        "line": 1,
+        "rule": "@typescript-eslint/await-thenable",
+        "explanation": "Unexpected `await` of a non-Promise (non-\"Thenable\") value.",
+        "confidence": "native diagnostic",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale."
+      }
+    ],
+    "native_tools": {
+      "eslint": "selected"
+    }
+  },
+  "pmd": {
+    "status": "CHECKED",
+    "scope": "Ruff PERF and Deadlion AST rules",
+    "files": 1,
+    "diagnostics": [
+      {
+        "file": "/tmp/deadlion-native44-ALUe/pmd/Count.java",
+        "line": 1,
+        "rule": "UseStringBufferForStringAppends",
+        "explanation": "Prefer StringBuilder (non-synchronized) or StringBuffer (synchronized) over += for concatenating strings",
+        "confidence": "native diagnostic",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale."
+      }
+    ],
+    "native_tools": {
+      "pmd": "selected"
+    }
+  },
+  "staticcheck": {
+    "status": "CHECKED",
+    "scope": "Ruff PERF and Deadlion AST rules",
+    "files": 1,
+    "diagnostics": [
+      {
+        "file": "/tmp/deadlion-native44-ALUe/staticcheck/probe.go",
+        "line": 3,
+        "rule": "SA6000",
+        "explanation": "calling regexp.MatchString in a loop has poor performance, consider using regexp.Compile",
+        "confidence": "native diagnostic",
+        "severity": "INFO",
+        "confirm": "Check semantics and compare the affected workload with dl-perf scale."
+      }
+    ],
+    "native_tools": {
+      "staticcheck": "selected"
+    }
+  },
+  "scaling_pmu_smoke": {
+    "schema": 1,
+    "status": "MEASURED",
+    "correctness": "VERIFIED",
+    "choice": "coreutils",
+    "environment": {
+      "platform": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+      "python": "3.14.8",
+      "affinity": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "cpu_model": "12th Gen Intel(R) Core(TM) i7-12700K"
+    },
+    "contract_sha256": "5d89c8f6bec1e7a432c7559fb707b3b6ee2be5d2f0359f63d73a2e253bbeac97",
+    "rows": [
+      {
+        "implementation": "coreutils",
+        "repetition": 0,
+        "dimensions": {
+          "n": 256
+        },
+        "distribution": "uniform",
+        "seed": 7231457067093208,
+        "phase": "confirmation",
+        "input_sha256": "1cba45b42fce34706912decb7d97a8474e6556fea55dee170e242a81391ace27",
+        "wall_ns": 4474347,
+        "user_cpu_s": 0.0,
+        "system_cpu_s": 0.004082,
+        "peak_rss_kib": 16136,
+        "cpu_time_s": 0.004082,
+        "voluntary_switches": 17,
+        "involuntary_switches": 3,
+        "instructions": 11552479.0,
+        "cycles": 4854175.0
+      },
+      {
+        "implementation": "python",
+        "repetition": 0,
+        "dimensions": {
+          "n": 256
+        },
+        "distribution": "uniform",
+        "seed": 7231457067093208,
+        "phase": "confirmation",
+        "input_sha256": "1cba45b42fce34706912decb7d97a8474e6556fea55dee170e242a81391ace27",
+        "wall_ns": 20338303,
+        "user_cpu_s": 0.012577,
+        "system_cpu_s": 0.007488999999999999,
+        "peak_rss_kib": 15976,
+        "cpu_time_s": 0.020065999999999997,
+        "voluntary_switches": 20,
+        "involuntary_switches": 3,
+        "instructions": 96389657.0,
+        "cycles": 70935533.0,
+        "reported_comparisons": 1728
+      }
+    ],
+    "models": [
+      {
+        "implementation": "coreutils",
+        "distribution": "uniform",
+        "metrics": {
+          "cycles": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          },
+          "instructions": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          },
+          "peak_rss_kib": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          },
+          "wall_ns": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          }
+        }
+      },
+      {
+        "implementation": "python",
+        "distribution": "uniform",
+        "metrics": {
+          "cycles": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          },
+          "instructions": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          },
+          "peak_rss_kib": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          },
+          "reported_comparisons": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          },
+          "wall_ns": {
+            "status": "INCONCLUSIVE",
+            "admissible": [],
+            "fits": [],
+            "observations": [],
+            "tested_points": 1
+          }
+        }
+      }
+    ],
+    "checks": [],
+    "comparisons": [
+      {
+        "pair": [
+          "python",
+          "coreutils"
+        ],
+        "distribution": "uniform",
+        "point": [
+          256
+        ],
+        "median_ratio": 4.5455354714330385,
+        "interval": null
+      }
+    ],
+    "revisions": {
+      "evaluator": null,
+      "candidate": null
+    },
+    "trusted_inputs": {
+      "generate.py": "7508b08a8cca86ebbf5cd24ded4ded6e49881061880515430c93ab06f27f8ae6"
+    },
+    "runtime_binaries": {
+      "/usr/bin/python3": "df5a95e6119c051c43ab78993af48f8a53c54a25a475dacd1428c322251eb8b0",
+      "/usr/bin/sort": "e768c01d28ef3eb8d10e86e4f50f14babda61659abbf1e959f039bf147d89c72"
+    },
+    "implementations": {
+      "python": {
+        "sort.py": "ee748ccfed3a220e4eef64a574ff402bbd59b105e7c149097d27303a27bf5b57"
+      },
+      "coreutils": {}
+    },
+    "settings": {
+      "dimensions": {
+        "n": [
+          256
+        ]
+      },
+      "distributions": [
+        "uniform"
+      ],
+      "generator": [
+        "python3",
+        "generate.py"
+      ],
+      "implementations": {
+        "python": {
+          "argv": [
+            "python3",
+            "sort.py"
+          ],
+          "files": [
+            "sort.py"
+          ],
+          "instrument": [
+            "python3",
+            "sort.py",
+            "--comparisons"
+          ]
+        },
+        "coreutils": {
+          "argv": [
+            "sort",
+            "-n"
+          ],
+          "files": []
+        }
+      },
+      "limits": {
+        "seconds": 160,
+        "memory_mib": 128,
+        "max_points": 24
+      },
+      "seed": 441,
+      "min_repetitions": 1,
+      "model_tolerance": 0.2,
+      "models": [
+        "constant",
+        "log",
+        "linear",
+        "linearithmic",
+        "quadratic"
+      ],
+      "requirements": [],
+      "metrics": [
+        "cycles",
+        "instructions"
+      ]
+    },
+    "next_experiments": [
+      "Measure additional independent sizes or operation counts within budget."
+    ],
+    "pareto": [
+      {
+        "distribution": "uniform",
+        "point": [
+          256
+        ],
+        "median_wall_ns_rss_kib": {
+          "coreutils": [
+            4474347,
+            16136
+          ],
+          "python": [
+            20338303,
+            15976
+          ]
+        },
+        "frontier": [
+          "coreutils",
+          "python"
+        ]
+      }
+    ]
+  }
+}

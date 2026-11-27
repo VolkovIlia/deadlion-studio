@@ -36,6 +36,14 @@ def inspect(files, *, source=None, deep=False):
                    explanation=item["message"], confirm="Review control flow and semantics." if structural_hint
                    else "Measure this path on representative input and verify semantics.")
 
+    if not deep:
+        from python_hints import hints
+        if source is not None:
+            yield from hints(files[1], source)
+        else:
+            for file in files[1:]:
+                yield from hints(file, Path(file).read_text())
+
 
 def cached_python(files, directory):
     # Only clean isolated Python snapshots are cached. CI always scans fresh.
@@ -43,7 +51,8 @@ def cached_python(files, directory):
     if not binary:
         raise ValueError("ruff missing")
     stat = Path(binary).stat()
-    identity = (binary, stat.st_dev, stat.st_ino, stat.st_ctime_ns, Path(__file__).stat().st_ctime_ns)
+    identity = (binary, stat.st_dev, stat.st_ino, stat.st_ctime_ns, Path(__file__).stat().st_ctime_ns,
+                Path(__file__).with_name("python_hints.py").stat().st_ctime_ns)
     directory.mkdir(parents=True, exist_ok=True)
     for path in files:
         source = path.read_text(encoding="utf-8")
@@ -93,6 +102,8 @@ def main():
     mode.add_argument("--stdin-name", type=Path, help="analyze Python source read from stdin")
     mode.add_argument("--all", action="store_true")
     mode.add_argument("--changed", action="store_true")
+    parser.add_argument("--infer-cost", action="store_true", help="capture trusted Java sources with Infer Cost")
+    parser.add_argument("--native", action="store_true", help="run installed project-aware tools for trusted source")
     parser.add_argument("--deep", action="store_true", help="also apply structural hints to Python")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", type=Path, help="private directory for verified clean Ruff snapshots")
@@ -102,7 +113,7 @@ def main():
         if args.paths or args.deep or args.stdin_name.suffix != ".py":
             parser.error("--stdin-name expects one Python filename and no paths")
         findings = list(inspect(["--stdin-filename", str(args.stdin_name), "-"], source=sys.stdin.read()))
-        print(json.dumps(dict(status="CHECKED", scope="Ruff PERF", files=1, diagnostics=findings)))
+        print(json.dumps(dict(status="CHECKED", scope="Ruff PERF and fast Python AST", files=1, diagnostics=findings)))
         return
     if bool(args.paths) == bool(args.all or args.changed):
         parser.error("select paths, --changed, or --all")
@@ -124,8 +135,20 @@ def main():
             findings.extend(inspect(["--", *python], deep=args.deep))
     if native:
         findings.extend(structural(native))
+    coverage = {}
+    if args.infer_cost:
+        from native_diagnostics import infer_cost
+        findings.extend(infer_cost(files))
+    if args.native:
+        from native_diagnostics import review
+        findings.extend(review(files, coverage))
+    findings = list({(str(Path(d["file"]).resolve()),d["line"],d["rule"]):d for d in findings}.values())
     report = dict(status="CHECKED" if files else "NOT APPLICABLE", scope="Ruff PERF and Deadlion AST rules",
                   files=len(files), diagnostics=findings)
+    if args.infer_cost:
+        report["scope"] += " and Infer Cost"
+    if args.native:
+        report["native_tools"] = coverage
     if args.json:
         print(json.dumps(report))
     else:

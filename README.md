@@ -8,7 +8,9 @@ Deadlion Studio provides an engineering workflow for OMP, Claude Code and Codex.
 The core plugin takes a project from design to release. Its performance tools
 compare implementations against a fixed workload, correctness oracle and resource budget.
 
-**Current release** · [deadlion 4.3.0](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.3.0) · [Performance engineering](#performance-engineering) · [Release measurements](docs/performance-audit.md#release-verification-on-fedora-44)
+**Core plugin on main** · 4.4.0 · [Performance engineering](#performance-engineering) · [4.4.0 verification report](docs/scaling-verification.md) · [Tagged release 4.3.0](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.3.0)
+
+`dl-perf scale` measures how runtime, memory and operation counts change across input sizes and distributions. It reports which growth models fit the measured range and where the evidence cannot distinguish between them.
 
 ## Engineering workflow
 
@@ -131,9 +133,17 @@ repo-level `.dev-docs/system.md`. Each file starts with `# <Title>` and
 
 ## Performance engineering
 
-The portable [performance skill](plugins/deadlion/skills/performance/SKILL.md) includes a contract validator, Ruff and ast-grep diagnostic adapters, Linux resource profiling and a paired-command benchmark with a trusted stdout fixture. Install Ruff 0.15.4 for Python and ast-grep 0.51.3 for the structural rules. On Fedora, GNU time supplies resource metrics and perf supplies optional PMU counters. The benchmark uses Python 3.11+ and its standard library. See the [command reference](plugins/deadlion/skills/performance/references/commands.md) for OMP installation, startup and measurement examples. The [audit](docs/performance-audit.md) records upstream revisions and legacy capabilities.
+The membership example compares scanning a list with building an index for repeated lookups. It varies list length and query count independently. To inspect the recorded experiment with Python 3.11+ on Linux, run these commands from the repository root. Replay recomputes model fits and comparisons from saved samples. The CSV contains individual measurements for plotting.
 
-CI executes every tracked `.performance/**/contract.json` and the indexed-membership control on the current checkout. Run `plugins/deadlion/skills/performance/scripts/dl-perf-gate PATH/contract.json` locally to reproduce the gate. A missing oracle, an unsupported budget, a regression or an inconclusive comparison fails the job. See the [worked contract](plugins/deadlion/evals/indexed-membership/contract.json).
+```sh
+tools=plugins/deadlion/skills/performance/scripts
+example=plugins/deadlion/evals/scaling-membership
+"$tools/dl-perf" scale "$example/contract.json" --replay "$example/measurements.json" --csv /tmp/membership.csv
+```
+
+For a fresh correctness and resource check, run `"$tools/dl-perf-gate" "$example/contract.json" --isolated`. Live isolated measurements require Linux, Bubblewrap, a user systemd manager and cgroup v2 CPU, memory and process controllers. The gate emits JSON. Exit 0 means the contract passed, exit 1 indicates a regression or evaluation error, and exit 2 covers inconclusive or unverified results and invalid invocations. [Contract and OMP command reference](plugins/deadlion/skills/performance/references/commands.md)
+
+On pull requests, CI loads the evaluator, oracles and approved contracts from the base commit. It runs the candidate files named by those contracts and records both commit IDs in the `performance-evidence` artifact. A missing required metric yields `NOT VERIFIED`. An `INCONCLUSIVE` result calls for a repeat on the project's performance runner. The approved contract can mark that outcome advisory. [PR workflow](.github/workflows/performance.yml) · [Evaluator](scripts/approved-performance)
 
 ## Tools
 

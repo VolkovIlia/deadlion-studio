@@ -10,7 +10,7 @@
       "name": "deadlion",
       "source": "./plugins/deadlion",
       "description": "Core engineering workflow with algorithm contracts, performance checks, hooks and agents",
-      "version": "4.3.0"
+      "version": "4.4.0"
     },
     {
       "name": "deadlion-triz",

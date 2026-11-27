@@ -19,13 +19,19 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def measure(command, workload, expected, timeout, cwd=None):
-    start = time.perf_counter_ns()
-    result = subprocess.run(command, input=workload, stdout=subprocess.PIPE,
-                            check=True, timeout=timeout, cwd=cwd)
-    elapsed = time.perf_counter_ns() - start
-    if digest(result.stdout) != expected:
-        raise ValueError("stdout differs from the trusted expected output")
+def measure(command, workload, expected, timeout, cwd=None, *, oracle=None, files=None):
+    from correctness import verify
+    if files is not None:
+        from correctness import checked_run
+        metrics = checked_run(cwd, files, command, workload, expected, oracle or {}, Path.cwd(),
+                              time.monotonic()+timeout, 512)
+        return metrics["wall_ns"]
+    else:
+        start = time.perf_counter_ns()
+        actual = subprocess.run(command, input=workload, stdout=subprocess.PIPE,
+                                check=True, timeout=timeout, cwd=cwd).stdout
+        elapsed = time.perf_counter_ns() - start
+    verify(oracle or {}, expected, actual, workload, Path.cwd(), timeout)
     return elapsed
 
 
@@ -80,28 +86,49 @@ def main():
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--tolerance", required=True, type=float)
+    parser.add_argument("--oracle-json", default="{}")
+    parser.add_argument("--isolated", action="store_true")
+    parser.add_argument("--file-lists", default="[null,null]")
     args = parser.parse_args()
+    from correctness import inputs, validate
+    oracle = json.loads(args.oracle_json)
+    validate(oracle)
     if not (8 <= args.runs <= 1000 and 0 <= args.warmups <= 100 and
             0 <= args.tolerance < float("inf") and 0 < args.timeout < float("inf")):
         parser.error("invalid measurement limits (runs 8..1000, warmups 0..100)")
     workload = Path(args.input).read_bytes()
-    expected = digest(Path(args.expected).read_bytes())
+    expected = Path(args.expected).read_bytes()
     commands = [shlex.split(args.baseline), shlex.split(args.candidate)]
     if not all(commands):
         parser.error("empty command")
     directories = [Path.cwd(), Path(args.candidate_dir).resolve()]
     pairs = []
     report = dict(parameters=vars(args), **environment(),
-                  input_sha256=digest(workload), expected_sha256=expected, wall_ns=pairs)
+                  input_sha256=digest(workload), expected_sha256=digest(expected), wall_ns=pairs)
     try:
-        report["command_inputs"] = command_inputs(commands, directories)
+        isolated = args.isolated or directories[0] != directories[1] or oracle.get("state_files") or oracle.get("deterministic")
+        files = [inputs(d, cmd, f) if isolated else None for d, cmd, f in
+                 zip(directories, commands, json.loads(args.file_lists), strict=True)]
+        def hashes():
+            if not isolated:
+                return command_inputs(commands,directories)
+            from candidate_runner import capsule
+            results = {}
+            for directory, names in zip(directories,files):
+                capsule(directory,names)
+                for name in names:
+                    with (directory/name).open("rb") as stream:
+                        results[str(directory/name)] = hashlib.file_digest(stream,"sha256").hexdigest()
+            return results
+        report["command_inputs"] = hashes()
         for i in range(-args.warmups, args.runs):
             pair = [0, 0]
             for index in (i % 2, 1 - i % 2):
-                pair[index] = measure(commands[index], workload, expected, args.timeout, directories[index])
+                pair[index] = measure(commands[index], workload, expected, args.timeout, directories[index],
+                                      oracle=oracle, files=files[index])
             if i >= 0:
                 pairs.append(pair)
-        if report["command_inputs"] != command_inputs(commands, directories):
+        if report["command_inputs"] != hashes():
             raise ValueError("command inputs changed during measurement")
         report.update(compare(pairs, args.tolerance))
     except (ValueError, OSError, subprocess.SubprocessError) as error:
@@ -127,8 +154,8 @@ def frontier(path):
                 type(v) not in (int, float) or not math.isfinite(v) for v in metrics.values()):
             raise ValueError("missing or invalid metric")
         costs[name] = tuple(metrics[k] * (1 if d == "min" else -1) for k, d in directions.items())
-    winners = [name for name, x in costs.items() if not any(
-        y != x and all(v <= w for v, w in zip(y, x)) for y in costs.values())]
+    from pareto import nondominated
+    winners = nondominated(costs)
     print(json.dumps(dict(status="MEASURED" if winners else "NOT VERIFIED",
                           frontier=winners, rejected=rejected, observations=cohort["candidates"])))
     return 0 if winners else 2
@@ -136,10 +163,13 @@ def frontier(path):
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:2] == ["scale"]:
+            from scaling import run
+            sys.exit(run(sys.argv[2:]))
         if sys.argv[1:2] == ["load"]:
             from load_measurement import run
             sys.exit(run(sys.argv[2:]))
         sys.exit(frontier(sys.argv[2]) if len(sys.argv) == 3 and sys.argv[1] == "frontier" else main())
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, ArithmeticError, SyntaxError, subprocess.SubprocessError) as error:
         print(json.dumps(dict(status="NOT VERIFIED", reason=str(error))))
         sys.exit(2)

@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Core plugin 4.4.0
+
+- Measure scaling on fixed-seed multidimensional workloads using `dl-perf scale`. Compare held-out predictions, paired ratios and observed time/memory tradeoffs.
+- Enforce independent numerical, property and state oracles, extended resource budgets and approved contracts in OMP and CI.
+- Isolate Evolution candidates with explicit files and separate training and holdout verification. Report fast Python AST hints after edits and select project-native tools for review.
+- Replay saved measurements and export individual samples to CSV or Extra-P JSON Lines. The verification report covers the membership and sorting experiments, local OMP runs, and limits of the coding-agent pilot. [Measurements and reproduction commands](docs/scaling-verification.md)
+
 ## [4.3.0] - 2026-11-28
 
 - The core plugin runs executable time and resource contracts, structural performance diagnostics and isolated OMP experiments.

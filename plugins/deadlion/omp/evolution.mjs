@@ -7,7 +7,7 @@ const run = promisify(execFile);
 
 async function verifyCandidate(limits, ctx, metric) {
   try {
-    const { stdout } = await run(limits.check, [], {
+    const { stdout } = await run(process.env.DL_HELPER ? "/usr/bin/python3" : limits.check, process.env.DL_HELPER ? ["-I", process.env.DL_HELPER, "verify"] : [], {
       cwd: ctx.cwd, timeout: Math.max(1, limits.deadline - Date.now()),
     });
     const witness = JSON.parse(stdout);
@@ -27,7 +27,20 @@ async function verifyCandidate(limits, ctx, metric) {
 export default function evolution(pi) {
   const directory = process.env.DL_EXPERIMENT;
   if (!directory) throw new Error("DL_EXPERIMENT is required");
-  pi.on("tool_call", async (event, ctx) => {
+  if (process.env.DL_HELPER) pi.registerTool({
+    name: "candidate_shell", label: "Candidate shell",
+    description: "Read and edit the declared candidate files in /work with an isolated shell.",
+    parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+    async execute(_id, input) {
+      const { stdout } = await run("/usr/bin/python3", ["-I", process.env.DL_HELPER, "shell", input.command]);
+      return { content: [{ type: "text", text: stdout.slice(0, 4096) }] };
+    },
+  });
+  async function authorize(event, ctx) {
+    if (process.env.DL_HELPER && !["init_experiment","run_experiment","log_experiment","candidate_shell"].includes(event.toolName))
+      return { block: true, reason: "Use candidate_shell to edit the declared files in /work." };
+    if (event.toolName === "log_experiment" && event.input.commit)
+      return { block: true, reason: "Verify and commit the current candidate." };
     const keep = event.toolName === "log_experiment" && event.input.status === "keep";
     if (!keep && !["init_experiment", "run_experiment"].includes(event.toolName)) return;
     const limits = JSON.parse(await readFile(join(directory, "limits.json"), "utf8"));
@@ -52,5 +65,23 @@ export default function evolution(pi) {
       return;
     }
     return { block: true, reason: "Total experiment budget exhausted" };
+  }
+
+  let activeCall;
+  if (process.env.DL_HELPER) pi.on("tool_result", event => {
+    if (activeCall === event.toolCallId) activeCall = undefined;
+  });
+  pi.on("tool_call", async (event, ctx) => {
+    if (!process.env.DL_HELPER) return authorize(event, ctx);
+    if (activeCall) return { block: true, reason: "Wait for the current candidate operation." };
+    activeCall = event.toolCallId;
+    try {
+      const verdict = await authorize(event, ctx);
+      if (verdict?.block) activeCall = undefined;
+      return verdict;
+    } catch (error) {
+      activeCall = undefined;
+      return { block: true, reason: String(error) };
+    }
   });
 }
