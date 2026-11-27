@@ -73,7 +73,7 @@ case $(sed 1q "$tmp/err") in
 esac
 
 # pick: filter, Enter prints the line, the terminal mode is restored
-start "$items | $BIN > $tmp/out; echo \$? > $tmp/rc; stty -a > $tmp/stty"
+start "$items | $BIN > $tmp/out; rc=\$?; stty -a > $tmp/stty; echo \$rc > $tmp/rc"
 wait_for alpha
 t send-keys -t s -l ga
 wait_for 'filter: ga'
