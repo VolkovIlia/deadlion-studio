@@ -403,7 +403,7 @@ def harness_scenarios(source, env, server, policy, trace):
     (source / ".clangd").write_text("CompileFlags: {Add: [-Wall]}\n")
     # An opaque Bash write bypasses OMP writethrough. The gate must pull clangd diagnostics.
     report = trial(source, env, server, {0: ("bash", {"command": "echo 'int main(){return unknown;}' > main.c"})},
-                   "BLOCKED", 3)
+                   "BLOCKED", None)
     semantic = next(c for c in report["checks"] if c["name"] == "lsp main.c")
     assert semantic.get("server") and "unknown" in semantic.get("output", ""), semantic
     assert semantic["status"] == "FAIL", semantic

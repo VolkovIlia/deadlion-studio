@@ -102,7 +102,6 @@ jobs:
       - name: Run native harness with scripted transport
         env:
           SCENARIO: ${{ matrix.scenario }}
-          DL_TEST_TRACE_ISOLATION: '1'
         run: |
           set -euo pipefail
           if ! systemd-run --user --wait --collect /usr/bin/true ||
@@ -111,6 +110,7 @@ jobs:
             exit 1
           fi
           if [ "$SCENARIO" = autoresearch_smoke ] || [ "$SCENARIO" = engineering_evolution ]; then
+            export DL_TEST_TRACE_ISOLATION=1
             nested_isolation() {
               bwrap --unshare-pid --unshare-ipc --unshare-uts --ro-bind / / \
                 --proc /proc --dev /dev -- \

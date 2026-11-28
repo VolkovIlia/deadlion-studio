@@ -189,6 +189,7 @@ def execute(
             "--user",
             "--wait",
             "--collect",
+            "--pipe",
             "--quiet",
             "--service-type=exec",
             "-p",
@@ -218,7 +219,9 @@ def execute(
             command, capture_output=True, timeout=math.ceil(timeout) + 3
         )
         if result.returncode or not (directory / "metrics").exists():
-            raise ValueError("candidate service failed or exhausted its budget")
+            detail = result.stderr.decode(errors="replace").strip()[-600:]
+            message = "candidate service failed or exhausted its budget"
+            raise ValueError(message + (". " + detail if detail else ""))
         output = (directory / "stdout").read_bytes()
         if len(output) > output_bytes:
             raise ValueError("candidate exceeded output limit")
