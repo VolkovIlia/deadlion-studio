@@ -11,6 +11,7 @@ import { verify, verifyToolInputs } from "./gate.mjs";
 import { lifecycleContext } from "./omp-compat.mjs";
 import { authorizeRefactorTool, bindMilestone, completeMilestone, milestonePrompt, refactorCommand } from "./refactor.mjs";
 import { activateMilestone, loadReservedTask, parkMilestone } from "./refactor-state.mjs";
+import { confirmNewTask, outcome, rejectPrompt, showTaskStatus } from "./task-input.mjs";
 
 // Factories are rebound by OMP. Use a shared lookup only for unambiguous
 // parent identities in this process. The main gate always checks disk again.
@@ -25,16 +26,6 @@ const entry = "deadlion.engineering.task";
 const transitionEntry = "deadlion.engineering.transition";
 const terminal = new Set(["VERIFIED", "BLOCKED", "CANCELLED", "INCOMPLETE"]);
 const hashTree = async task => digest(JSON.stringify(await snapshot(task.cwd)));
-
-async function outcome(task, ctx) {
-  await persist(task);
-  const reason = task.last?.failures?.[0]?.reason || task.last?.reason;
-  const message = `Deadlion ${task.state} · ${task.last?.status ?? "NOT VERIFIED"}` +
-    (reason ? "\n" + reason : "") + "\n" + (task.last?.receipt ?? task.directory);
-  ctx.ui?.notify(message, task.state === "VERIFIED" ? "info" : "warning");
-  if (process.env.DL_VERDICT_FILE)
-    await save(process.env.DL_VERDICT_FILE, { state: task.state, task: task.id, report: task.last });
-}
 
 class EngineeringSession {
   constructor(pi) {
@@ -90,16 +81,25 @@ class EngineeringSession {
       this.pi.appendEntry?.(entry, { directory, id });
       return task;
     }
-    const task = await prior ?? await restoreTask(ctx, entry);
+    const interactive = newRequest && ctx.mode === "tui";
+    const task = await prior ?? await restoreTask(ctx, entry, { allowMoved: interactive });
     if (existingOnly) return task;
     const milestone = transition === "milestone" ? selection.slice(10) : undefined;
+    const moved = task && task.cwd !== ctx.cwd;
+    const expired = task && (task.deadline <= Date.now() || task.analysisMs <= 0);
+    if (interactive && task && !task.refactor && !selection &&
+        (moved || task.state !== "VERIFIED" && (expired || terminal.has(task.state)) && process.env.DL_RESUME_TASK !== "1")) {
+      await confirmNewTask(task, ctx, expired);
+      selection = "new";
+    }
+    if (moved && selection !== "new") throw new Error("Stored task does not match this OMP session");
     if (!task || milestone || selection === "new" || newRequest && task.state === "VERIFIED") {
       if (task?.refactor && !terminal.has(task.state))
         throw new Error("Stop or finish the active refactoring milestone before starting another task");
       if (task) this.release(ctx, task);
       return this.createTask(ctx, prompt, milestone);
     }
-    if (newRequest && terminal.has(task.state)) resumeTask(task, selection);
+    if (newRequest && (expired || terminal.has(task.state))) resumeTask(task, selection);
     return task;
   }
 
@@ -208,16 +208,13 @@ class EngineeringSession {
 
   async before_agent_start(event, ctx) {
     if (ctx.agent?.kind === "sub") return;
+    showTaskStatus(ctx, "Deadlion: preparing request…");
     let task;
     try {
       task = await this.taskFor(ctx, event.prompt, true);
       if (task.refactor) await activateMilestone(ctx, task);
-    }
-    catch (error) {
-      ctx.ui?.notify(error.message, "error");
-      if (process.env.DL_VERDICT_FILE) await save(process.env.DL_VERDICT_FILE,
-        { state: "INCOMPLETE", reason: error.message });
-      ctx.abort?.();
+    } catch (error) {
+      await rejectPrompt(event.prompt, error, ctx);
       return;
     }
     const key = this.session(ctx);
@@ -239,6 +236,7 @@ class EngineeringSession {
     task.designIssue = await design(task);
     task.state = task.designIssue ? "DESIGN" : "IMPLEMENTATION";
     await persist(task);
+    showTaskStatus(ctx, "Deadlion: working…");
     const skills = task.mode === "Standard" ? "workflow, unix-design, build and verify" :
       "workflow, unix-design, decompose, write-plan, performance, build and verify";
     return { message: { customType: "deadlion.policy", display: false,

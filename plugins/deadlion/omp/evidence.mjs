@@ -212,11 +212,12 @@ function validateCoveragePolicy(policy) {
       throw new Error(name + " requires normalized project-relative paths");
 }
 
-export async function restoreTask(ctx, entry) {
+export async function restoreTask(ctx, entry, { allowMoved = false } = {}) {
   const previous = ctx.sessionManager?.getBranch().filter(e => e.type === "custom" && e.customType === entry).at(-1);
   if (!previous) return;
   const task = await read(join(previous.data.directory, "task.json"));
-  if (task.id !== previous.data.id || task.directory !== previous.data.directory || task.cwd !== ctx.cwd)
+  if (task.id !== previous.data.id || task.directory !== previous.data.directory ||
+      (task.cwd !== ctx.cwd && (!allowMoved || task.refactor)))
     throw new Error("Stored task does not match this OMP session");
   return task;
 }
