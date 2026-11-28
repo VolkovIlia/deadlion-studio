@@ -12,7 +12,7 @@ No production code without a failing test first. Code written before its test is
 and rewritten after the test fails for the right reason.
 
 ## Gates (blocking, in order)
-1. **Pre-flight**: project env and toolchain present (`cc`, `cargo`, venv…), dependencies consistent (`pip check`, lockfile in sync). Broken env → stop and report; do not test around it.
+1. **Pre-flight**: check the toolchain and dependency consistency. Diagnose environment failures in autonomous OMP. Repair within existing permissions or leave affected checks open and continue independent work. Report unavailable checks in interactive review.
 2. **Isolated (unit)**: 100% pass before running integration.
 3. **Integration**: 100% pass; contracts match their schema files.
 4. **Workflows**: every happy path covered end to end.
@@ -66,7 +66,7 @@ Classify every failure into exactly one row. Calling a non-failure a failure is 
 | Test bug | Flaky (<95% pass rate), non-deterministic | Pin seed, fix test, re-run once |
 | Infra / timeout | Budget exceeded, network | Decompose; retry with backoff, max 2 |
 
-Never widen a threshold to pass. After 2 retries of a transient failure, stop and report.
+Keep the recorded thresholds. After two failed transient retries, investigate a different execution path or defer the affected check and continue independent work in autonomous OMP.
 
 ## Logs
 Test logs go to `.logs/tests/{unit,integration,e2e}/` (`mkdir -p` first); never `.log` files in the project root.

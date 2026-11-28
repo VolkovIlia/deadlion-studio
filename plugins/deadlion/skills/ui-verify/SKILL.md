@@ -129,4 +129,4 @@ FIXED: <file:line — what>
 REMAINING: <gate — element — why not fixed>
 ```
 
-After 5 iterations with failures, stop and report the REMAINING list; don't keep looping.
+After five failed repairs, reassess the strategy. In autonomous OMP, return the remaining failures to the agent for diagnosis and continue independent work while dependent gates stay open. In interactive review, report the remaining failures.
