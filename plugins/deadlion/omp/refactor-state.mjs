@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { changes, digest, read, save, snapshot } from "./evidence.mjs";
+import { executionSnapshot, migrateExecution } from "./execution.mjs";
 
 export const state = directory => join(directory, "plan-state.json");
 export const reservation = directory => join(directory, "active.json");
@@ -79,6 +80,9 @@ export async function parkMilestone(task) {
     const active = await optional(reservation(directory));
     if (active?.task !== task.id || active.owner?.pid !== process.pid) return;
     const status = task.state === "BLOCKED" ? "FAILED" : "PAUSED";
+    const current = await read(state(directory));
+    current.execution = executionSnapshot(task);
+    await save(state(directory), current);
     await save(reservation(directory), { ...active, owner: null, status });
   });
 }
@@ -132,6 +136,10 @@ export async function recoverReservation({ directory, root }, operation, ctx, se
 async function cancelReservation(directory, current, active, paths, tree) {
   current.milestones ??= {};
   current.milestones[active.id] = "CANCELLED";
+  const saved = /^[a-f0-9-]{36}$/.test(active.task ?? "") &&
+    await optional(join(dirname(dirname(directory)), active.task, "task.json")).catch(() => undefined);
+  if (saved?.id === active.task && saved.refactor?.campaign === current.id)
+    current.execution = executionSnapshot(migrateExecution(saved));
   await recordRecovery(directory, active, paths, "cancel", current.checkpoint, tree);
   await save(state(directory), current);
   await unlink(reservation(directory));
@@ -170,4 +178,50 @@ export async function archiveCampaign({ directory, current }) {
   await save(state(directory), { ...current, status: "ARCHIVED", archived: new Date().toISOString() });
   await rename(directory, archive);
   return archive;
+}
+
+export function readyMilestones(current) {
+  if (current.status !== "ACTIVE") return [];
+  return Object.values(current.steps).filter(step => !current.results[step.id] &&
+    !["DEFERRED", "BLOCKED", "CANCELLED"].includes(current.milestones?.[step.id]) &&
+    step.depends.every(id => current.results[id]));
+}
+
+export async function deferMilestone(task, reason, ctx) {
+  const { directory, id, campaign } = task.refactor;
+  return withCampaignLock(directory, async () => {
+    const current = await read(state(directory));
+    const active = await read(reservation(directory));
+    if (active.task !== task.id || current.id !== campaign || current.checkpoint !== task.baselineHash ||
+        active.session !== ctx.sessionManager?.getSessionId() || active.owner?.pid !== process.pid)
+      throw new Error("Milestone reservation changed");
+    const tree = await snapshot(task.root);
+    if (digest(JSON.stringify(tree)) !== current.checkpoint) return false;
+    current.milestones ??= {};
+    current.milestones[id] = "DEFERRED";
+    current.execution = executionSnapshot(task);
+    await save(join(directory, "milestone-" + id + "-deferred.json"), {
+      task: task.id, reason, receipt: task.last?.receipt, checkpoint: current.checkpoint,
+    });
+    await save(state(directory), current);
+    await unlink(reservation(directory));
+    return true;
+  });
+}
+
+export async function saveMissionBudget(task, change) {
+  const directory = task.refactor?.directory ?? task.refactorFinal;
+  if (!directory) return;
+  await withCampaignLock(directory, async () => {
+    const current = await read(state(directory));
+    const active = await optional(reservation(directory));
+    if (await ownerAlive(active?.owner) || active && active.task !== task.id ||
+        current.id !== (task.refactor?.campaign ?? task.missionId))
+      throw new Error("Campaign ownership changed");
+    const previous = current.execution ?? executionSnapshot(task);
+    current.execution = { ...previous, [change.key]: change.after,
+      budgetChanges: [...previous.budgetChanges ?? [], change] };
+    await save(state(directory), current);
+    Object.assign(task, current.execution);
+  });
 }

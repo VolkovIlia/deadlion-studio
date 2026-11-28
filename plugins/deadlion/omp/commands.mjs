@@ -6,6 +6,7 @@ import { approvalHash, changes, inventory, persist, read, save, snapshot, stateH
 import { servers } from "./lsp.mjs";
 import { compatibility } from "./omp-compat.mjs";
 import { setup } from "./setup.mjs";
+import { budgetStatus, exhausted, limit, operationTimeout, timeLeft, tokensUsed } from "./execution.mjs";
 
 async function approvedWorkloads(task) {
   const { train, holdout } = task.workloads;
@@ -14,20 +15,29 @@ async function approvedWorkloads(task) {
   return [train.path, holdout.path];
 }
 
-async function evolve(task) {
+function evolutionBudget(task) {
   const spec = task.policy.evolution;
+  if (exhausted(task)) throw new Error(exhausted(task));
   if (task.mode !== "Evolution" || !spec?.goal || !Number.isSafeInteger(spec.iterations) ||
       !Number.isSafeInteger(spec.seconds) || !spec.train || !spec.holdout || !spec.files?.length)
     throw new Error("Evolution requires approved train, holdout, files, iterations and seconds.");
+  const seconds = Math.min(spec.seconds, Math.floor((limit(task.deadline) - Date.now()) / 1000));
+  if (seconds <= 0) throw new Error("No remaining approved Evolution time");
+  const tokens = task.tokenLimit == null ? 0 : task.tokenLimit - tokensUsed(task);
+  return { spec, seconds, tokens };
+}
+
+async function evolve(task) {
+  const { spec, seconds, tokens } = evolutionBudget(task);
   const revision = await execute(["git", "rev-parse", "--verify", "HEAD"], { cwd: task.root });
   if (revision.code || revision.stdout.trim() !== task.base) throw new Error("Experiment requires the approved base checkout.");
-  const seconds = Math.min(spec.seconds, Math.floor((task.deadline - Date.now()) / 1000));
   const directory = join(task.directory, "experiment");
   const tool = fileURLToPath(new URL("dl-evolve", import.meta.url));
   const [train, holdout] = await approvedWorkloads(task);
   const result = await execute([tool, directory, "--goal", spec.goal, "--contract", train,
     "--holdout-contract", holdout, "--iterations", String(spec.iterations), "--seconds", String(seconds),
-    "--tokens", String(task.tokenLimit ?? 0), ...spec.files.flatMap(file => ["--candidate-file", file])], { cwd: task.root, timeout: seconds * 1000 });
+    "--tokens", String(tokens),
+    ...spec.files.flatMap(file => ["--candidate-file", file])], { cwd: task.root, timeout: seconds * 1000 });
   await save(join(task.directory, "evolution.json"), result);
   if (result.code) throw new Error("Evolution failed. See " + join(task.directory, "evolution.json"));
   const helper = fileURLToPath(new URL("experiment-result.py", import.meta.url));
@@ -58,7 +68,7 @@ export function commands(pi, taskFor, fullCheck, transition) {
 async function runCommand(command, ctx, { pi, taskFor, fullCheck, transition }) {
   if (command === "setup" || command.startsWith("setup approve "))
     return setup(ctx.cwd, stateHome(), command.slice(14), save);
-  if (["new", "resume", "continue", "retry", "stop", "refactor"].includes(command) || command.startsWith("refactor "))
+  if (["new", "resume", "continue", "retry", "stop", "budget", "refactor"].includes(command) || /^(?:budget|refactor) /.test(command))
     return transition(command, ctx);
   const task = await taskFor(ctx, "", false, true);
   if (command === "doctor") return doctor(ctx.cwd, pi.getActiveTools().includes("lsp"), task);
@@ -86,16 +96,20 @@ async function analyzeChanges(task) {
   const paths = changes(await read(join(task.directory, "baseline.json")), await snapshot(task.cwd));
   const files = await regular(task.root, paths.filter(supported));
   const report = resolve(task.directory, "analysis.json");
-  const result = files.length ? await analyze(files, { cwd: task.cwd, timeout: Math.min(task.analysisMs, task.deadline - Date.now()) },
+  const result = files.length ? await analyze(files, { cwd: task.cwd, timeout: Math.min(operationTimeout(task), timeLeft(task)) },
     task.policy.native === true) : { status: "NOT APPLICABLE", diagnostics: [] };
   await save(report, result);
   return { status: result.status, diagnostics: result.diagnostics.length, report };
 }
 
 function currentStatus(task) {
+  const latest = task.recovery?.recent.at(-1);
   return [
-    `${task.id} · ${task.state} · ${task.mode} · ${task.route?.scope ?? "unknown scope"}`,
-    `Verification ${task.last?.status ?? "pending"} · remaining analysis ${Math.ceil(task.analysisMs / 1000)} s`,
+    `Mission ${task.refactor?.campaign ?? task.missionId ?? task.id} · ${task.state} · ${task.mode}`,
+    task.goal && `Goal ${task.goal.slice(0, 240)}`,
+    task.refactor && `Milestone ${task.refactor.id} · ${task.refactor.step.title}`,
+    `Verification ${task.last?.status ?? "pending"} · ${budgetStatus(task)}`,
+    latest && `Recovery ${latest.cause} · ${latest.strategy}`,
     task.designIssue ?? task.policy.setupIssue ?? task.last?.failures?.[0]?.reason,
     task.last?.receipt,
   ].filter(Boolean).join("\n");

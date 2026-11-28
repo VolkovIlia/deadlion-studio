@@ -90,7 +90,7 @@ def policy_scenarios(source, env, server, policy):
     report = trial(source, env, server, {}, "BLOCKED", 1)
     assert any("timeout" in c.get("reason", "") for c in report["checks"])
     policy.write_text(json.dumps({"tests": ["missing-deadlion-check"]}))
-    report = trial(source, env, server, {}, "BLOCKED", 1)
+    report = trial(source, env, server, {}, "BLOCKED", 2)
     assert report["status"] == "NOT VERIFIED", report
     policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."]}))
 

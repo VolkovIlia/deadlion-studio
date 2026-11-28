@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { execute } from "./process.mjs";
 import { discover, projectPolicy } from "./setup.mjs";
 import { scopeList } from "./coverage.mjs";
+import { executionLimits, exhausted, migrateExecution, timeLeft } from "./execution.mjs";
 
 export const scripts = fileURLToPath(new URL("../skills/performance/scripts/", import.meta.url));
 export const limits = fileURLToPath(new URL("../skills/suckless-code/scripts/", import.meta.url));
@@ -36,7 +37,7 @@ export async function inventory(cwd, policy = {}, options = {}) {
 
 export async function incremental(task, signal) {
   const result = await execute(["python3", "-I", workspace, task.directory, task.scanCursor ?? ""],
-    { cwd: task.root, timeout: Math.min(2000, task.deadline - Date.now()), signal });
+    { cwd: task.root, timeout: Math.min(2000, timeLeft(task)), signal });
   if (result.code) throw new Error(result.stderr);
   const batch = JSON.parse(result.stdout);
   task.scanCursor = batch.cursor;
@@ -95,11 +96,6 @@ export async function openTask(ctx, prompt) {
   const policyFile = process.env.DL_ENGINEERING_POLICY && resolve(ctx.cwd, process.env.DL_ENGINEERING_POLICY);
   const approvedPolicy = policyFile && await readFile(policyFile);
   const policy = await selectPolicy(baseline.root, approvedPolicy);
-  const integer = (name, fallback, min) => {
-    const value = policy[name] ?? fallback;
-    if (!Number.isSafeInteger(value) || value < min) throw new Error("invalid policy " + name);
-    return value;
-  };
   const modes = ["Standard", "Performance", "Research", "Evolution"];
   validatePolicy(policy, modes, baseline.files);
   const route = classify(prompt, policy, Boolean(process.env.DL_PERF_CONTRACT));
@@ -110,14 +106,12 @@ export async function openTask(ctx, prompt) {
   const task = { id, directory, cwd: ctx.cwd, root: baseline.root, base: baseline.base, git: baseline.git,
     kind, mode, route, policy, policyFile, policyHash: approvedPolicy ? digest(approvedPolicy) : undefined,
     contract, candidate: resolve(ctx.cwd, process.env.DL_PERF_CANDIDATE_DIR || "."),
-    started: start, deadline: start + integer("seconds", 900, 1) * 1000,
-    analysisMs: integer("analysisSeconds", 120, 1) * 1000, corrections: 0,
-    maxCorrections: integer("maxCorrections", 2, 0), state: "INITIALIZED", receipts: [] };
+    goal: prompt, started: start, ...executionLimits(policy, start), executionVersion: 1,
+    corrections: 0, state: "INITIALIZED", receipts: [] };
   if (policy.semgrepConfig) {
     policy.semgrepConfig = resolve(task.root, policy.semgrepConfig);
     task.semgrepConfigHash = digest(await readFile(policy.semgrepConfig));
   }
-  if (policy.tokens !== undefined) task.tokenLimit = integer("tokens", 0, 1);
   task.usage = { cached: 0, input: 0, output: 0 };
   task.baselineHash = digest(JSON.stringify(baseline));
   task.tools = await inventory(task.root, policy);
@@ -219,14 +213,14 @@ export async function restoreTask(ctx, entry, { allowMoved = false } = {}) {
   if (task.id !== previous.data.id || task.directory !== previous.data.directory ||
       (task.cwd !== ctx.cwd && (!allowMoved || task.refactor)))
     throw new Error("Stored task does not match this OMP session");
-  return task;
+  return migrateExecution(task);
 }
 
 export function resumeTask(task, selection) {
   if (!["resume", "continue"].includes(selection) && process.env.DL_RESUME_TASK !== "1")
     throw new Error("Use /deadlion new, continue or resume for the unfinished task");
-  if (task.deadline <= Date.now() || task.analysisMs <= 0)
-    throw new Error("Task budget exhausted. Use /deadlion new to start a new task.");
+  const reason = exhausted(task);
+  if (reason) throw new Error(reason + ". Use /deadlion budget to continue the same task.");
   task.state = "INITIALIZED";
 }
 

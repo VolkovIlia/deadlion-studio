@@ -11,6 +11,7 @@ import { changedArea, contains, contractCoverage, coverageFor, documentation } f
 import { testResult } from "./test-result.mjs";
 import { compatibility } from "./omp-compat.mjs";
 import { verifyMilestone } from "./refactor.mjs";
+import { chargeAnalysis, operationTimeout, timeLeft } from "./execution.mjs";
 
 const semanticSource = p => supported(p) || /\.(h|hpp|tsx|jsx|mjs|cjs)$/.test(p);
 const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/.+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
@@ -175,8 +176,8 @@ function projectContracts(task, paths) {
 
 export async function verify(task, signal, budget = 20000, probe) {
   const started = Date.now();
-  const until = Math.min(task.deadline, started + task.analysisMs, started + budget);
-  const options = () => ({ cwd: task.root, signal, timeout: until - Date.now() });
+  const until = started + Math.min(timeLeft(task, started), budget);
+  const options = () => ({ cwd: task.root, signal, timeout: Math.min(operationTimeout(task), until - Date.now()) });
   const checks = [];
   let source;
   let workspaceHash;
@@ -202,9 +203,10 @@ export async function verify(task, signal, budget = 20000, probe) {
   } catch (error) {
     checks.push({ name: "verification", status: signal?.aborted ? "CANCELLED" : "NOT VERIFIED", reason: error.message });
   }
-  task.analysisMs = Math.max(0, task.analysisMs - (Date.now() - started));
+  chargeAnalysis(task, started);
   if (signal?.aborted || Date.now() >= until)
-    checks.push({ name: "verification interrupted", status: signal?.aborted ? "CANCELLED" : "BLOCKED" });
+    checks.push({ name: "verification interrupted", status: signal?.aborted ? "CANCELLED" : "BLOCKED",
+      reason: signal?.aborted ? "Cancelled" : "Verification time slice elapsed" });
   return receiptFor(task, checks, area, source, workspaceHash, started);
 }
 
@@ -251,7 +253,7 @@ async function reviewChanges(task, { baseline, current, paths, area, source, che
 async function checkRequirements(task, paths, area, checks, run) {
   const code = paths.some(p => !documentation(p));
   if (!code && (task.route?.readOnly || task.route?.intent === "documentation")) return;
-  await approvedCommands(task, checks, run);
+  await approvedCommands(task, checks, run, area);
   const performance = await checkContracts(task, paths, checks, run);
   if (task.designIssue) checks.push({ name: "design", status: "BLOCKED", reason: task.designIssue });
   const missing = coverageFor(area, checks).filter(row => row.status === "NOT VERIFIED");
@@ -263,7 +265,7 @@ async function checkRequirements(task, paths, area, checks, run) {
     checks.push({ name: "approved experimental contract", status: "NOT VERIFIED" });
 }
 
-async function approvedCommands(task, checks, run) {
+async function approvedCommands(task, checks, run, area) {
   if (task.policy.profile) {
     const spec = task.policy.profile;
     const argv = [join(scripts, "dl-profile"), ...Object.entries(spec.max ?? {}).flatMap(([k,v]) => ["--max", k + "=" + v]),
@@ -276,6 +278,7 @@ async function approvedCommands(task, checks, run) {
     bindTestEvidence(checks.at(-1), task.policy.tests, task.policy.testsScope ?? []);
   }
   for (const step of task.policy.checks ?? []) {
+    if (!neededInMilestone(task, step, area)) continue;
     const cwd = resolve(task.root, step.cwd ?? ".");
     if (await realpath(cwd) !== cwd) throw new Error("Approved test directory changed");
     await run("plan: " + step.name, step.argv, false, process.env, cwd);
@@ -283,6 +286,13 @@ async function approvedCommands(task, checks, run) {
     if (step.type === "functional") bindTestEvidence(result, step.argv, step.scope ?? [], step.requireTestCount);
     else result.coverage = { type: step.type ?? "policy", paths: step.scope ?? [], argv: step.argv };
   }
+}
+
+function neededInMilestone(task, check, area) {
+  const stage = task.refactor?.step;
+  if (!stage || !check.scope || stage.checks.includes("plan: " + check.name)) return true;
+  const targets = [...stage.scope, ...area.flatMap(row => row.interface ? row.affectedComponents : [row.path])];
+  return check.scope.some(scope => targets.some(path => contains(scope, path) || contains(path, scope)));
 }
 
 function bindTestEvidence(check, argv, paths, requireCount) {
@@ -296,14 +306,25 @@ function bindTestEvidence(check, argv, paths, requireCount) {
 
 async function record(checks, options, name, argv, json, env = process.env, cwd) {
   const execution = options();
-  const result = await execute(argv, { ...execution, env, cwd: cwd ?? execution.cwd });
+  let result;
+  try { result = await execute(argv, { ...execution, env, cwd: cwd ?? execution.cwd }); }
+  catch (error) {
+    if (execution.signal?.aborted) throw error;
+    checks.push({ name, status: "NOT VERIFIED", data: { stdout: "", stderr: "" }, reason: error.message });
+    return "NOT VERIFIED";
+  }
+  const check = commandEvidence(name, result, json);
+  checks.push(check);
+  return check.status;
+}
+
+function commandEvidence(name, result, json) {
   let status = result.code === 0 ? "PASS" : result.code === 1 ? "FAIL" : "NOT VERIFIED";
   const data = json ? JSON.parse(result.stdout) : result;
   if (json) status = ({ VERIFIED: "PASS", MEASURED: "PASS", ERROR: "FAIL", "PERFORMANCE REGRESSION": "FAIL" })[data.status] ?? data.status;
   if (!["PASS","FAIL","WARNING","INCONCLUSIVE","NOT APPLICABLE","NOT VERIFIED","BLOCKED","CANCELLED"].includes(status) ||
       result.code && ["PASS","WARNING","NOT APPLICABLE"].includes(status)) status = "NOT VERIFIED";
-  checks.push({ name, status, data, reason: result.code ? String(data.reason || result.stderr || data.status || result.stdout).slice(-400) : undefined });
-  return status;
+  return { name, status, data, reason: result.code ? String(data.reason || result.stderr || data.status || result.stdout).slice(-400) : undefined };
 }
 
 export async function verifyToolInputs(task, options) {
@@ -343,5 +364,22 @@ async function receiptFor(task, checks, area, source, workspaceHash, started) {
     elapsedMs: Date.now() - started };
   await save(receipt, evidence);
   const scaling = checks.flatMap(c => (c.data?.contracts ?? [c.data]).map(scalingSummary).filter(Boolean)).slice(0, 2);
-  return { receipt, receiptHash: digest(JSON.stringify(evidence)), status, paths, source, scaling, failures: failures.map(c => ({ name:c.name, status:c.status, reason:String(c.reason ?? c.output ?? c.data?.reason ?? "").slice(0, 360) })) };
+  return { receipt, receiptHash: digest(JSON.stringify(evidence)), status, paths, source, scaling,
+    confirmed: checks.filter(c => c.status === "PASS").map(c => c.name), deficits: checkDeficits(failures),
+    failures: failures.map(c => ({ name:c.name, status:c.status, reason:String(c.reason ?? c.output ?? c.data?.reason ?? "").slice(0, 360) })) };
+}
+
+function checkDeficits(failures) {
+  const deficits = {};
+  for (const { name, data } of failures) {
+    for (const item of data?.violations ?? []) {
+      if (Number.isFinite(item.value) && Number.isFinite(item.limit))
+        deficits[name + " " + item.name] = item.value - Math.max(item.limit, item.baseline ?? 0);
+    }
+    for (const [metric, budget] of Object.entries(data?.budgets ?? {})) {
+      const observed = data.metrics?.[metric];
+      if (Number.isFinite(observed) && observed > budget) deficits[name + " " + metric] = observed - budget;
+    }
+  }
+  return deficits;
 }

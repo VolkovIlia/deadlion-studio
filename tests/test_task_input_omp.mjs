@@ -20,6 +20,7 @@ async function scenario(t, { moved = false, accept = true, mode = 'tui', corrupt
     await rm(root, { recursive: true, force: true });
   });
   const old = { id: 'old', directory, cwd: moved ? join(root, 'previous') : cwd, state: 'INCOMPLETE',
+    policy: { seconds: 1 },
     deadline: 1, analysisMs: 10000, refactor: refactor ? { directory: root } : null,
     last: { reason: 'wall-clock budget exhausted' } };
   const file = join(directory, 'task.json');
@@ -47,7 +48,7 @@ for (const moved of [false, true]) test(`confirmed message starts a distinct tas
   const next = JSON.parse(await readFile(join(branch.at(-1).data.directory, 'task.json'), 'utf8'));
   assert.notEqual(next.id, 'old');
   assert.equal(next.cwd, cwd);
-  assert.ok(next.deadline > next.started);
+  assert.equal(next.deadline, null);
 });
 
 test('declining retains the unsent text and shows why work stopped', async t => {

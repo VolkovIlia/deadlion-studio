@@ -44,6 +44,8 @@ omp
 
 Run `/deadlion setup` to inspect recommended checks and explicitly approve the functional scope of discovered tests. Use `/deadlion doctor` to inspect compatibility and available tools. For CI, `dl-omp` returns exit code 0 only after validating the receipt and current workspace. Remove a user link with `omp plugin uninstall deadlion-studio`. [Scoped functional verification](docs/omp-4.6.1.md#scoped-functional-verification)
 
+For development builds, see the [engineering recovery and budget guide](docs/omp-recovery.md).
+
 ### Claude Code
 
 ```

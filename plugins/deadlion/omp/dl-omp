@@ -96,10 +96,12 @@ def supervise(process, path, prompt, deadline):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("prompt")
-    parser.add_argument("--seconds", type=int, default=900)
+    parser.add_argument("--seconds", type=int, required=True, help="approved elapsed-time limit for this RPC run")
     parser.add_argument("--resume", help="OMP session id or path for unfinished work")
     parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
+    if args.seconds <= 0:
+        parser.error("--seconds must be positive")
     with tempfile.TemporaryDirectory(prefix="deadlion-rpc-") as tmp:
         path = Path(tmp) / "verdict.json"
         cmd = ["omp", "--mode", "rpc", "--no-judge", "--no-spotlight"]

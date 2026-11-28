@@ -1,89 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath, readdir, unlink } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { mkdir, realpath, readdir, unlink } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { changedArea, contains, documentation, scopeList } from "./coverage.mjs";
-import { changes, digest, openTask, read, save, snapshot, stateHome } from "./evidence.mjs";
+import { changes, digest, openTask, persist, read, save, snapshot, stateHome } from "./evidence.mjs";
 import { execute } from "./process.mjs";
 import { discover } from "./setup.mjs";
 import { ratchet } from "./ratchet.mjs";
 export { ratchet } from "./ratchet.mjs";
-import { archiveCampaign, checkpoint, finalReceiptStatus, optional, ownerAlive, recoverReservation, reservation, state, withCampaignLock } from "./refactor-state.mjs";
+import { archiveCampaign, checkpoint, finalReceiptStatus, optional, ownerAlive, readyMilestones, recoverReservation, reservation, state, withCampaignLock } from "./refactor-state.mjs";
+import { exhausted, executionSnapshot, migrateExecution } from "./execution.mjs";
+
+import { planSource, revisePlan } from "./refactor-plan.mjs";
+export { parsePlan } from "./refactor-plan.mjs";
 
 const metricsHelper = fileURLToPath(new URL("structural.py", import.meta.url));
-const entries = value => value.split(",").map(s => s.trim().replace(/^\x60|\x60$/g, "")).filter(s => s && s !== "—");
-
-export function parsePlan(text) {
-  if (!/^Status: approved\s*$/m.test(text)) throw new Error("Refactoring plan must have Status: approved");
-  const steps = {};
-  for (const section of text.split(/^### /m).slice(1)) {
-    const [heading, ...lines] = section.split("\n");
-    const match = /^([A-Z][0-9]+):\s*(.+)$/.exec(heading);
-    if (!match) continue;
-    const [, id, title] = match;
-    const fields = Object.fromEntries(lines.map(line => /^([A-Za-z]+):\s*(.+)$/.exec(line))
-      .filter(Boolean).map(([, key, value]) => [key, value]));
-    const scope = entries(fields.Files ?? "");
-    if (!scopeList(scope) || ["Verify", "Change", "Test", "Depends"].some(name => !fields[name]) || steps[id])
-      throw new Error("Invalid or incomplete milestone " + id);
-    const owners = assignOwners(fields.Owners ?? "", scope, id);
-    steps[id] = { id, title, scope, owners, depends: entries(fields.Depends), verify: fields.Verify, change: fields.Change,
-      test: fields.Test, ...planRequirements(fields) };
-  }
-  if (!Object.keys(steps).length) throw new Error("Refactoring plan has no milestones");
-  validateDependencies(steps);
-  return steps;
-}
-
-function planRequirements(fields) {
-  const required = entries(fields.Required ?? "");
-  return { advisory: entries(fields.Advisory ?? ""), unsupported: entries(fields.Constraints ?? ""), required,
-    checks: [...new Set([...entries(fields.Checks ?? ""), ...required])] };
-}
-
-function assignOwners(value, scope, id) {
-  const owners = Object.create(null);
-  for (const assignment of entries(value)) {
-    const [agent, path, extra] = assignment.split("=");
-    if (extra || !/^[a-z][a-z0-9-]*$/.test(agent) || !scopeList([path]) ||
-        !scope.some(item => contains(item, path)))
-      throw new Error("Invalid subagent scope in " + id);
-    if (Object.values(owners).flat().some(other => contains(other, path) || contains(path, other)))
-      throw new Error("Overlapping subagent scopes in " + id);
-    (owners[agent] ??= []).push(path);
-  }
-  return owners;
-}
-
-function validateDependencies(steps) {
-  const visited = new Set();
-  const visiting = new Set();
-  function visit(id) {
-    if (!Object.hasOwn(steps, id)) throw new Error("Unknown milestone dependency: " + id);
-    if (visiting.has(id)) throw new Error("Cyclic milestone dependency at " + id);
-    if (visited.has(id)) return;
-    visiting.add(id);
-    steps[id].depends.forEach(visit);
-    visiting.delete(id);
-    visited.add(id);
-  }
-  Object.keys(steps).forEach(visit);
-}
-
 export async function structuralMetrics(root, options = {}) {
   const result = await execute(["python3", "-I", metricsHelper], { cwd: root, maxBytes: 32 << 20, ...options });
   if (result.code) throw new Error(result.stderr.trim().split("\n").at(-1));
   return JSON.parse(result.stdout);
-}
-
-async function planSource(root, path) {
-  const fullPath = resolve(root, path);
-  const name = relative(root, fullPath);
-  if (!scopeList([name]) || isAbsolute(name) || await realpath(fullPath) !== fullPath)
-    throw new Error("Refactoring plan must be a regular file inside the project");
-  const text = await readFile(fullPath, "utf8");
-  const steps = parsePlan(text);
-  return { path: name, steps, text, planHash: digest(JSON.stringify(steps)) };
 }
 
 export async function activeRefactor(cwd) {
@@ -111,6 +46,8 @@ export async function startRefactor(ctx, plan, task, receipt) {
     throw new Error("Could not capture a stable original checkout");
   const baselineEvidence = receipt && await read(receipt);
   const baselineStatus = captureStatus(baselineEvidence);
+  task.goal = /^Goal:\s*(.+)$/m.exec(spec.text)?.[1] ?? spec.text.split("\n", 1)[0].replace(/^#+\s*/, "");
+  await persist(task);
   const id = randomUUID();
   await withCampaignLock(directory, async () => {
     if (await optional(state(directory))) throw new Error("A campaign is already present");
@@ -121,7 +58,7 @@ export async function startRefactor(ctx, plan, task, receipt) {
       baselineStatus, measurements: measurementChecks(baselineEvidence),
       baselineTask: task.directory, trackedPatch: patch.stdout });
     await save(join(directory, "plans", "1.json"), { ...spec, reason: "Original approval" });
-    await save(state(directory), { ...spec, id, status: "ACTIVE", revision: 1, root,
+    await save(state(directory), { ...spec, id, goal: task.goal, status: "ACTIVE", revision: 1, root, execution: executionSnapshot(task),
       baseline: source, checkpoint: source, results: {}, milestones: {} });
   });
   return `Campaign ${id} · snapshot ${baseline.base} · verification ${baselineStatus}`;
@@ -136,6 +73,10 @@ export async function bindMilestone(ctx, id, task) {
   if (current.results[id] || !step.depends.every(dep => current.results[dep]))
     throw new Error("Milestone is complete or still has unfinished prerequisites");
   if (task.baselineHash !== current.checkpoint) throw new Error("Working tree changed since the last checkpoint");
+  const global = await read(join(directory, "global.json"));
+  const origin = await read(join(global.baselineTask, "task.json"));
+  if (origin.policyHash !== task.policyHash || JSON.stringify(origin.policy) !== JSON.stringify(task.policy))
+    throw new Error("Campaign engineering policy changed");
   const structure = await structuralMetrics(root);
   const missing = unresolvedConstraints(step, task);
   if (missing.length) throw new Error("Milestone constraints NOT VERIFIED: " + missing.join(", "));
@@ -148,6 +89,9 @@ export async function bindMilestone(ctx, id, task) {
     if (await optional(reservation(directory))) throw new Error("A milestone is reserved. Resume or recover it.");
     if (digest(JSON.stringify(await snapshot(root))) !== latest.checkpoint)
       throw new Error("Working tree changed while binding the milestone");
+    Object.assign(task, latest.execution);
+    task.goal = latest.goal ?? task.goal;
+    if (exhausted(task)) throw new Error(exhausted(task));
     await save(join(task.directory, "structural-baseline.json"), structure);
     const milestone = { directory, campaign: latest.id, id, step, planHash: latest.planHash };
     await save(join(task.directory, "task.json"), { ...task, refactor: milestone });
@@ -209,8 +153,9 @@ export async function finalRefactorTask(ctx) {
   const task = await read(join(baseline.baselineTask, "task.json"));
   if (task.baselineHash !== current.baseline || baseline.source !== current.baseline)
     throw new Error("Original refactoring baseline changed");
-  return { ...task, refactorFinal: directory, deadline: Date.now() + (task.policy.seconds ?? 900) * 1000,
-    analysisMs: (task.policy.analysisSeconds ?? 120) * 1000 };
+  migrateExecution(task);
+  return { ...task, ...current.execution, refactorFinal: directory, missionId: current.id, finalPlanHash: current.planHash,
+    finalCheckpoint: current.checkpoint };
 }
 
 export async function completeMilestone(task, report) {
@@ -237,6 +182,7 @@ async function commitMilestone(task, report) {
     source: report.source, paths: report.paths };
   current.checkpoint = report.source;
   current.checkpointPath = "checkpoint-" + id + ".json";
+  current.execution = executionSnapshot(task);
   await save(join(directory, current.checkpointPath), tree);
   await save(state(directory), current);
   await unlink(lock);
@@ -277,6 +223,7 @@ export async function refactorStatus(ctx, report = false, validate) {
       (step.depends.every(dep => current.results[dep]) ? "READY" : "WAITING")}`);
   if (!report) {
     lines.unshift("Campaign " + (current.id ?? "legacy") + " · " + (current.status ?? "ACTIVE"));
+    if (current.goal) lines.unshift("Goal " + current.goal);
     if (active?.session) lines.push("OMP session " + active.session);
     return lines.join("\n");
   }
@@ -350,6 +297,14 @@ export async function refactorCommand(command, ctx, verify, select, validate) {
     select("milestone " + value);
     return "Next prompt will start milestone " + value + ".";
   }
+  if (operation === "run") {
+    const { current, directory } = await activeRefactor(ctx.cwd);
+    if (!current || await optional(reservation(directory))) throw new Error("Resolve the current reservation first");
+    const [first] = readyMilestones(current);
+    if (!first) throw new Error("No ready milestones. Review /deadlion refactor status");
+    select("campaign " + first.id);
+    return "Next prompt will run the campaign from " + first.id + ".";
+  }
   if (operation === "verify") return finalizeCampaign(ctx, verify, validate);
   if (operation === "reconcile") return reconcileCheckpoint(ctx);
   if (["plan", "status", "report"].includes(operation)) return refactorStatus(ctx, operation === "report", validate);
@@ -362,16 +317,23 @@ async function finalizeCampaign(ctx, verify, validate) {
     if (await optional(reservation(directory))) throw new Error("Resolve the active milestone before final verification");
     const final = await finalRefactorTask(ctx);
     const result = await verify(final);
-    const current = await read(state(directory));
-    const plan = await planSource(final.root, current.path);
-    if (current.planHash !== plan.planHash || result.status === "PASS" && current.checkpoint !== result.source)
-      throw new Error("Plan or checkpoint changed during final verification");
-    await save(join(directory, "final-receipt.json"), result);
-    current.status = result.status === "PASS" ? "COMPLETED" : "ACTIVE";
-    current.finalPlanHash = plan.planHash;
-    await save(state(directory), current);
+    await saveCampaignFinal(final, result);
     return refactorStatus(ctx, true, validate);
   });
+}
+
+export async function saveCampaignFinal(task, report) {
+  const directory = task.refactorFinal;
+  const current = await read(state(directory));
+  const plan = await planSource(task.root, current.path);
+  if (current.id !== task.missionId || current.planHash !== task.finalPlanHash || current.planHash !== plan.planHash ||
+      current.checkpoint !== task.finalCheckpoint || report.status === "PASS" && current.checkpoint !== report.source)
+    throw new Error("Plan or checkpoint changed during final verification");
+  await save(join(directory, "final-receipt.json"), report);
+  current.status = report.status === "PASS" ? "COMPLETED" : "ACTIVE";
+  current.finalPlanHash = plan.planHash;
+  current.execution = executionSnapshot(task);
+  await save(state(directory), current);
 }
 
 async function manageCampaign(ctx, operation, value, select) {
@@ -407,33 +369,6 @@ function campaignTransition(current, active, operation, value) {
   if (operation === "resume" && current.status === "PAUSED") return "ACTIVE";
   if (operation === "cancel" && value === "campaign" && !active && current.status !== "ARCHIVED") return "CANCELLED";
   throw new Error("Allowed operations are pause, resume, recover, cancel, revise, verify, archive, history and report.");
-}
-
-async function revisePlan({ directory, root }, value) {
-  const [token, ...reason] = value.trim().split(/\s+/);
-  return withCampaignLock(directory, async () => {
-    const current = await read(state(directory));
-    if (!["ACTIVE", "PAUSED"].includes(current.status) || await optional(reservation(directory)))
-      throw new Error("Resolve the milestone reservation before revising the campaign");
-    const spec = await planSource(root, current.path);
-    if (!token) return "Candidate plan " + spec.planHash + " · use revise <hash> <reason> to approve.";
-    if (token !== spec.planHash || !reason.length) throw new Error("Use the current plan hash and a reason");
-    for (const id of Object.keys(current.results)) {
-      if (JSON.stringify(spec.steps[id]) !== JSON.stringify(current.steps[id]))
-        throw new Error("Keep verified milestones unchanged. Add a follow-up milestone for new requirements.");
-    }
-    const prior = await checkpoint(directory, current);
-    const tree = await snapshot(root);
-    if (changes(prior, tree).some(path => path !== current.path))
-      throw new Error("Review unrelated checkout changes before approving the plan");
-    const revision = current.revision + 1;
-    await save(join(directory, "plans", revision + ".json"), { ...spec, reason: reason.join(" "), parent: current.planHash });
-    const checkpointPath = "checkpoint-plan-" + revision + ".json";
-    await save(join(directory, checkpointPath), tree);
-    await save(state(directory), { ...current, ...spec, revision, checkpointPath,
-      checkpoint: digest(JSON.stringify(tree)), finalPlanHash: undefined });
-    return "Approved plan revision " + revision;
-  });
 }
 
 function measurementChecks(evidence) {

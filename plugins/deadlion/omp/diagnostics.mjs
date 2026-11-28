@@ -1,3 +1,4 @@
+import { timeLeft } from "./execution.mjs";
 import { randomUUID } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
@@ -78,11 +79,11 @@ export function compact(report, seen) {
 export async function feedback(task, event, ctx, seen, lookup, signal) {
   const files = await regular(task.root, editPaths(event).map(p => resolve(ctx.cwd, p)).filter(supported));
   if (!files.length) return;
-  const report = await analyze(files, { cwd: ctx.cwd, signal, timeout: Math.min(5000, task.analysisMs, task.deadline - Date.now()) });
+  const report = await analyze(files, { cwd: ctx.cwd, signal, timeout: Math.min(5000, timeLeft(task)) });
   const target = report.diagnostics.find(d => d.semanticTarget);
   if (lookup && target) {
     const before = await realpath(target.file);
-    const timeout = AbortSignal.timeout(Math.max(1, Math.min(3000, task.analysisMs, task.deadline - Date.now())));
+    const timeout = AbortSignal.timeout(Math.max(1, Math.min(3000, timeLeft(task))));
     try { target.typeContext = await lookup(ctx.cwd, before, target.semanticTarget, signal ? AbortSignal.any([signal, timeout]) : timeout); }
     catch (error) { target.semanticStatus = "INCONCLUSIVE"; target.semanticReason = error.message; }
   }
