@@ -32,8 +32,13 @@ export default function evolution(pi) {
     description: "Read and edit the declared candidate files in /work with an isolated shell.",
     parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
     async execute(_id, input) {
-      const { stdout } = await run("/usr/bin/python3", ["-I", process.env.DL_HELPER, "shell", input.command]);
-      return { content: [{ type: "text", text: stdout.slice(0, 4096) }] };
+      try {
+        const { stdout } = await run("/usr/bin/python3", ["-I", process.env.DL_HELPER, "shell", input.command]);
+        return { content: [{ type: "text", text: stdout.slice(0, 4096) }] };
+      } catch (error) {
+        const detail = (error.stderr || error.stdout || error.message).slice(-1200);
+        throw new Error("Candidate shell failed. " + detail);
+      }
     },
   });
   async function authorize(event, ctx) {
