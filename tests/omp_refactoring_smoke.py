@@ -39,7 +39,7 @@ Owners: implementer=api.py, task=storage.py
 """
 
 
-def prepare(root, server):
+def prepare(root, server, plugin=PLUGIN):
     profile, source = fixture.setup(root, server.server_port)
     trace = root / "events.jsonl"
     neighbour(profile, trace)
@@ -62,7 +62,7 @@ def prepare(root, server):
     (source / "legacy.py").write_text("answer = 42\n" + "# legacy\n" * 10)
     (source / "storage-contract.json").write_text('{"answer":42}\n')
     (source / "plan.md").write_text(PLAN)
-    subprocess.run(["omp", "plugin", "link", PLUGIN], cwd=source, env=env, check=True, capture_output=True)
+    subprocess.run(["omp", "plugin", "link", plugin], cwd=source, env=env, check=True, capture_output=True)
     trial(source, env, server, {}, "VERIFIED", 1, prompt="Summarize the project.")
     session = next(json.loads(row)[3] for row in trace.read_text().splitlines()
                    if json.loads(row)[0] == "before_agent_start")

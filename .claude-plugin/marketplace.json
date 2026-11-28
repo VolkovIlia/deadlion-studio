@@ -10,7 +10,7 @@
       "name": "deadlion",
       "source": "./plugins/deadlion",
       "description": "Engineering workflow, native OMP quality gates, algorithm contracts and performance checks",
-      "version": "4.6.3"
+      "version": "4.6.4"
     },
     {
       "name": "deadlion-triz",

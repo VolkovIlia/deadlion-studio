@@ -4,7 +4,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { activeForFile } from "./lsp.mjs";
 import { checkSemgrep } from "./semgrep.mjs";
 import { execute } from "./process.mjs";
-import { approvalHash, changes, digest, inventory, limits, read, samePython, save, scripts, snapshot, stateHome } from "./evidence.mjs";
+import { approvalHash, changes, digest, integrationFingerprint, inventory, limits, read, samePython, save, scripts, snapshot, stateHome } from "./evidence.mjs";
 import { projectPolicy } from "./setup.mjs";
 import { analyze, gateFindings, regular, scalingSummary, supported } from "./diagnostics.mjs";
 import { changedArea, contains, contractCoverage, coverageFor, documentation } from "./coverage.mjs";
@@ -15,6 +15,7 @@ import { chargeAnalysis, operationTimeout, timeLeft } from "./execution.mjs";
 
 const semanticSource = p => supported(p) || /\.(h|hpp|tsx|jsx|mjs|cjs)$/.test(p);
 export const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/.+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
+const runningIntegration = integrationFingerprint().catch(() => null);
 
 function semanticStatus(item, required) {
   return !required && ["NOT VERIFIED", "INCONCLUSIVE"].includes(item.status) ? "WARNING" : item.status;
@@ -185,9 +186,12 @@ export async function verify(task, signal, budget = 20000, probe) {
   let workspaceHash;
   let paths = [];
   let area = [];
+  let tools;
   const run = (...args) => record(checks, options, ...args);
   try {
-    const { baseline, current } = await verifiedInputs(task, options());
+    const initial = await verifiedInputs(task, options());
+    const { baseline, current } = initial;
+    tools = initial.tools;
     source = digest(JSON.stringify(current));
     workspaceHash = current.fingerprint;
     paths = source === task.baselineHash ? [] : changes(baseline, current);
@@ -203,13 +207,14 @@ export async function verify(task, signal, budget = 20000, probe) {
       }
     }
   } catch (error) {
-    checks.push({ name: "verification", status: signal?.aborted ? "CANCELLED" : "NOT VERIFIED", reason: error.message });
+    checks.push({ name: "verification", status: signal?.aborted ? "CANCELLED" : "NOT VERIFIED", reason: error.message,
+      restartRequired: error.restartRequired });
   }
   chargeAnalysis(task, started);
   if (signal?.aborted || Date.now() >= until)
     checks.push({ name: "verification interrupted", status: signal?.aborted ? "CANCELLED" : "BLOCKED",
       reason: signal?.aborted ? "Cancelled" : "Verification time slice elapsed" });
-  return receiptFor(task, checks, area, source, workspaceHash, started);
+  return receiptFor(task, checks, area, source, workspaceHash, started, tools);
 }
 
 function observeRoute(task, paths, area) {
@@ -338,7 +343,8 @@ function commandEvidence(name, result, json) {
 }
 
 export async function verifyToolInputs(task, options) {
-  if (JSON.stringify(await inventory(task.root, task.policy, options)) !== JSON.stringify(task.tools))
+  const tools = await inventory(task.root, task.policy, options);
+  if (JSON.stringify({ ...tools, integration: task.tools.integration }) !== JSON.stringify(task.tools))
     throw new Error("verification inputs, analyzer installation or Core changed");
   if (task.approved && task.approvalHash !== await approvalHash(task, options)) throw new Error("approved fixtures changed");
   if (task.policyFile && task.policyHash !== digest(await readFile(task.policyFile)))
@@ -348,35 +354,42 @@ export async function verifyToolInputs(task, options) {
     throw new Error("Project setup or approved test scope changed. Review /deadlion setup and start a new task.");
   if (task.policy.semgrepConfig && task.semgrepConfigHash !== digest(await readFile(task.policy.semgrepConfig)))
     throw new Error("Semgrep configuration changed");
+  if (tools.integration !== await runningIntegration) {
+    const error = new Error("Deadlion verifier changed on disk. Continue engineering work and restart OMP in the same session for fresh verification.");
+    error.restartRequired = true;
+    throw error;
+  }
+  return tools;
 }
 
 async function verifiedInputs(task, options) {
   if (task.enforcement === false || compatibility(task.tools.omp).lifecycle !== "VERIFIED")
     throw new Error("Mandatory OMP lifecycle enforcement is NOT VERIFIED for " + task.tools.omp);
-  await verifyToolInputs(task, options);
+  const tools = await verifyToolInputs(task, options);
   const baseline = await read(join(task.directory, "baseline.json"));
   if (task.baselineHash !== digest(JSON.stringify(baseline))) throw new Error("baseline receipt changed");
   const current = await snapshot(task.cwd, options);
   if (baseline.root !== current.root || baseline.git !== current.git) throw new Error("workspace identity changed");
   if (current.git && !task.base && Object.keys(current.files).some(p => p.startsWith(".performance/")))
     throw new Error("approved revision required for project contracts");
-  return { baseline, current };
+  return { baseline, current, tools };
 }
 
-async function receiptFor(task, checks, area, source, workspaceHash, started) {
+async function receiptFor(task, checks, area, source, workspaceHash, started, tools) {
   const failures = checks.filter(c => !["PASS", "WARNING", "NOT APPLICABLE"].includes(c.status));
   const status = failures[0]?.status ?? "PASS";
   const receipt = join(task.directory, "gate-" + randomUUID() + ".json");
   const paths = area.map(row => row.path);
   const evidence = { version: 2, task: task.id, baseline: task.base, baselineHash: task.baselineHash,
-    route: task.route, policy: task.policy, toolIdentity: digest(JSON.stringify(task.tools)), source, workspaceHash, paths, checks, status,
+    route: task.route, policy: task.policy, toolIdentity: tools && digest(JSON.stringify(tools)), source, workspaceHash, paths, checks, status,
+    integration: { baseline: task.tools.integration, verified: tools?.integration },
     coverage: coverageFor(area, checks), diagnostics: gateFindings(checks, task.root),
     elapsedMs: Date.now() - started };
   await save(receipt, evidence);
   const scaling = checks.flatMap(c => (c.data?.contracts ?? [c.data]).map(scalingSummary).filter(Boolean)).slice(0, 2);
   return { receipt, receiptHash: digest(JSON.stringify(evidence)), status, paths, source, scaling,
     confirmed: checks.filter(c => c.status === "PASS").map(c => c.name), deficits: checkDeficits(failures),
-    failures: failures.map(c => ({ name:c.name, status:c.status, approval:c.approval,
+    failures: failures.map(c => ({ name:c.name, status:c.status, approval:c.approval, restartRequired:c.restartRequired,
       reason:String(c.reason ?? c.output ?? c.data?.reason ?? "").slice(0, 360) })) };
 }
 

@@ -1,6 +1,6 @@
 # SlopZero engineering recovery in OMP
 
-Deadlion Studio `v4.6.3` builds on `v4.6.2` at `b45bb3744181ab7f6b77786002485502cca904d3`. Use the tagged checkout or verify the release archive with `sha256sum -c deadlion-studio-4.6.3.tar.gz.sha256` before extraction. Link the `plugins/deadlion` directory with `omp plugin link` and restart OMP. [4.6.3 downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3)
+Use the tagged `v4.6.4` checkout or verify the release archive with `sha256sum -c deadlion-studio-4.6.4.tar.gz.sha256` before extraction. Link the `plugins/deadlion` directory with `omp plugin link` and restart OMP. [4.6.4 downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4)
 
 ## OMP ownership and integration
 
@@ -53,7 +53,11 @@ Use `/deadlion status` for the current task, goal, milestone, budget and recent 
 
 Existing tasks retain expressly configured limits. On restore, implicit 900-second, 120-second and two-correction defaults from 4.6.2 are removed. The original approved policy, checkout baseline and recorded evidence carry forward. Add `--seconds` to unattended `dl-omp` invocations and use existing OMP session controls for supervision. An existing campaign may continue using manual milestones or opt into `refactor run` after resolving any current reservation.
 
-Verification remains tied to the verifier revision recorded when the task was opened. An unfinished task opened under an older revision can report changed verification inputs after upgrading. Same-task approvals apply when the pinned verifier and its existing inputs still match.
+### Resume after a plugin update
+
+When the installed integration changes during a running OMP process, Deadlion records `AWAITING_RESTART · NOT VERIFIED` and leaves continuation to OMP. Authorized independent work can continue. Restart OMP and reopen the **same** session when ready to verify. Use `omp --resume SESSION_ID` or OMP's session picker. Keep the current checkout and its edits in place.
+
+The restarted process runs the gate against the original baseline with the updated integration. Task and goal IDs, policy, evidence history and budgets carry forward. A fresh receipt records the baseline integration and the integration used by the running verifier. The Core, analyzer executables, approved policy and verification inputs must still match. Pending functional scope and test-revision approvals follow the same task approval commands. A final campaign report whose receipt predates the loaded verifier needs another `/deadlion refactor verify`.
 
 Recovery can choose independent work when the current checkout permits a safe handoff. Automated in-place rollback of dirty candidates, reopening verified milestones, multi-worktree integration, and autonomous execution after OMP exits remain outside this implementation. Recovery depends on the provider and the active OMP session. A scoped stage or a native goal's state does not certify the whole campaign. Advanced recovery for arbitrarily incompatible architecture changes still needs a recorded technical proposal or an operator decision.
 
@@ -69,4 +73,4 @@ python3 tests/omp_task_input_smoke.py
 
 The live recovery fixture uses OMP and scripted loopback transport. It asserts more than two productive corrections, cycle detection, operation timeout recovery, deferred and waiting stages, independent work, controlled decomposition and final verification, original baseline retention, budget extension, preservation of dirty worktrees and native Goal continuity. GitHub CI includes the recovery fixture for the two pinned OMP versions.
 
-On Fedora 44 all eight recovery scenarios passed with OMP 19.2.0 and 19.2.1. The native Goal tests kept the same active Goal after a failed check and after `AWAITING_APPROVAL`. Independent work continued in the latter case while the engineering result remained `NOT VERIFIED`. The approval test accepted the reviewed scope and test revision in the same task, then invalidated acceptance after a subsequent test edit. TUI prompt recovery at 80 and 40 columns and local isolated Evolution approval passed in the preceding recovery validation. `dl-size` and `git diff --check` passed. [Hosted run and skipped scenarios for the tagged revision](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3)
+On Fedora 44 all ten recovery scenarios passed with OMP 19.2.0 and 19.2.1. The verifier update fixtures retain an active native Goal, reject a cached PASS after an on-disk change, resume the original task after restarting OMP, and reject a later edit to an approved external oracle. The scope approval fixture invalidates acceptance after a subsequent test edit. [Hosted run and skipped scenarios for the tagged revision](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4)

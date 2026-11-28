@@ -14,13 +14,14 @@ export async function approveTaskTests(task, ctx, args) {
   if (digest(data) !== expected.toLowerCase()) throw new Error("Test approval file differs from the reviewed digest");
   const approval = JSON.parse(data);
   const checks = approvedChecks(approval, task);
-  await verifyToolInputs(task);
+  const previousTools = await verifyToolInputs(task);
   const revisions = await approvedRevisions(task, approval.testRevision);
   if (!checks.length && !Object.keys(revisions).length) throw new Error("No checks or test revisions to approve");
   const policy = checks.length ? { ...task.policy, checks: [...task.policy.checks ?? [], ...checks] } : task.policy;
   const tools = await inventory(task.root, policy);
-  if (!sameInputs(task.tools, tools)) throw new Error("Existing tool or verification inputs changed during approval");
-  const updated = { ...task, policy, tools, approvedTestRevisions: { ...task.approvedTestRevisions, ...revisions },
+  if (!sameInputs(previousTools, tools)) throw new Error("Existing tool or verification inputs changed during approval");
+  const updated = { ...task, policy, tools: { ...tools, integration: task.tools.integration },
+    approvedTestRevisions: { ...task.approvedTestRevisions, ...revisions },
     testApprovals: [...task.testApprovals ?? [], { digest: expected.toLowerCase(), at: Date.now(), checks, revisions }] };
   await persist(updated);
   Object.assign(task, updated);

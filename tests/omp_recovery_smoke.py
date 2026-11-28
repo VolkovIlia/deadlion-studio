@@ -3,6 +3,7 @@ from hashlib import sha256
 from http.server import HTTPServer
 import json
 import queue
+import shutil
 import time
 from pathlib import Path
 import subprocess
@@ -59,7 +60,8 @@ Depends: {depends}
 
 
 def campaign(root, server, replan=False, dirty=False):
-    source, env, session = prepare(root, server)
+    installed = installed_copy(root) if replan else PLUGIN
+    source, env, session = prepare(root, server, installed)
 
     def command(message):
         result = subprocess.run(["omp", "--offline", "--no-judge", "--no-spotlight", "--resume", session, "-p", message],
@@ -110,6 +112,7 @@ def campaign(root, server, replan=False, dirty=False):
         assert current["status"] == "COMPLETED" and set(current["results"]) == {"T1", "T4"}, current
         assert current["revision"] == 2 and (directory / "final-receipt.json").is_file()
         assert verdict["report"]["status"] == "PASS"
+        check_campaign_upgrade(command, installed, directory)
     elif dirty:
         verdict = run({0: write("broken.txt", "unverified candidate\n")}, "BLOCKED")
         current = json.loads((directory / "plan-state.json").read_bytes())
@@ -161,8 +164,29 @@ def budget_resume(root, server):
     assert final["baselineHash"] == original["baselineHash"] and final["goal"] == original["goal"]
 
 
-def native_goal(root, server, approval_pending=False):
-    source, env = environment(root, server)
+def installed_copy(root):
+    return shutil.copytree(PLUGIN, root / "installed-plugin", ignore=shutil.ignore_patterns("__pycache__"))
+
+
+def update_installation(plugin):
+    adapter = plugin / "omp/commands.mjs"
+    adapter.write_text(adapter.read_text() + "\n// Test verifier installation change\n")
+
+
+def check_campaign_upgrade(command, installed, directory):
+    comparison = directory / "comparison.json"
+    update_installation(installed)
+    command("/deadlion refactor report")
+    stale = json.loads(comparison.read_bytes())
+    assert stale["status"] == "NOT VERIFIED" and "predates the loaded verifier" in stale["staleInputs"], stale
+    command("/deadlion refactor verify")
+    refreshed = json.loads(comparison.read_bytes())
+    assert refreshed["status"] == "VERIFIED" and refreshed["finalReceipt"] != stale["finalReceipt"], refreshed
+
+
+def native_goal(root, server, approval_pending=False, verifier_changed=False):
+    plugin = installed_copy(root) if verifier_changed else PLUGIN
+    source, env = environment(root, server, plugin)
     profile = Path(env["PI_CODING_AGENT_DIR"]) / "config.yml"
     with profile.open("a") as stream:
         stream.write("goal:\n  enabled: true\n  continuationModes: [rpc]\n")
@@ -172,6 +196,13 @@ def native_goal(root, server, approval_pending=False):
     options = {**env, "DL_ENGINEERING_POLICY": str(policy), "DL_VERDICT_FILE": str(verdict)}
     server.contracts = False
     server.steps, server.context, server.calls = {0: write("candidate", "bad")}, [], 0
+    if verifier_changed:
+        def update(_index, _request):
+            if not server.calls:
+                update_installation(plugin)
+                return write("candidate", "bad")
+        server.steps = update
+    pending = "AWAITING_RESTART" if verifier_changed else "AWAITING_APPROVAL" if approval_pending else None
     process = subprocess.Popen(["omp", "--mode", "rpc", "--offline", "--no-judge", "--no-spotlight"],
                                cwd=source, env=options, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, text=True)
@@ -204,18 +235,21 @@ def native_goal(root, server, approval_pending=False):
         assert first["success"]
         until(lambda event: event.get("type") == "session_settled" and verdict.exists())
         failed = json.loads(verdict.read_bytes())
-        assert failed["state"] == ("AWAITING_APPROVAL" if approval_pending else "BLOCKED"), failed
+        assert failed["state"] == (pending or "BLOCKED"), failed
+        if pending:
+            stored = root / "state/deadlion" / failed["task"] / "task.json"
+            assert json.loads(stored.read_bytes())["corrections"] == 0, failed
         send(type="goal", op="get", id="goal")
         goal = until(lambda event: event.get("id") == "goal" and event.get("type") == "response")["data"]["goal"]
         assert goal["status"] == "active" and goal["id"] == first["data"]["goal"]["id"]
-        task = write("notes.md", "# Independent work\n") if approval_pending else write("candidate", "correct")
+        task = write("notes.md", "# Independent work\n") if pending else write("candidate", "correct")
         server.steps = {server.calls: task}
         send(type="prompt", id="continue", message="Continue the existing OMP goal.")
         until(lambda event: event.get("type") == "session_settled")
         finished = json.loads(verdict.read_bytes())
-        assert finished["state"] == ("AWAITING_APPROVAL" if approval_pending else "VERIFIED"), finished
+        assert finished["state"] == (pending or "VERIFIED"), finished
         assert finished["task"] == failed["task"]
-        if approval_pending:
+        if pending:
             assert (source / "notes.md").is_file() and finished["report"]["status"] == "NOT VERIFIED"
             send(type="goal", op="get", id="still-active")
             live = until(lambda event: event.get("id") == "still-active" and event.get("type") == "response")
@@ -228,6 +262,57 @@ def native_goal(root, server, approval_pending=False):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+
+
+def verifier_upgrade(root, server):
+    installed = installed_copy(root)
+    source, env, session = prepare(root, server, installed)
+    approval = Path(env["DL_ENGINEERING_POLICY"])
+    oracle = root / "oracle.txt"
+    oracle.write_text("correct")
+    check = checks_for("candidate", 1)
+    check["argv"][2] = f"from pathlib import Path; assert Path('candidate').read_text() == Path({str(oracle)!r}).read_text()"
+    check["argv"].append(str(oracle))
+    approval.write_text(json.dumps({"checks": [check]}))
+    verdict = root / "verdict.json"
+    options = {**env, "DL_VERDICT_FILE": str(verdict)}
+    command = ["omp", "--offline", "--no-judge", "--no-spotlight", "--resume", session, "-p"]
+
+    def steps(index, _request):
+        if index == 0:
+            return write("candidate", "correct")
+        if index == 1:
+            return "deadlion_verify", {}
+        if index == 2:
+            update_installation(installed)
+
+    def run(actions, state, calls):
+        server.steps, server.context, server.calls = actions, [], 0
+        result = subprocess.run([*command, "Implement the candidate."], cwd=source, env=options,
+                                text=True, capture_output=True, timeout=24)
+        report = json.loads(verdict.read_bytes())
+        assert result.returncode == 0 and report["state"] == state and server.calls == calls, (report, result.stderr, server.calls)
+        return report
+
+    stale = run(steps, "AWAITING_RESTART", 3)
+    assert stale["report"]["failures"][0]["restartRequired"]
+    path = root / "state/deadlion" / stale["task"]
+    original = json.loads((path / "task.json").read_bytes())
+    baseline = (path / "baseline.json").read_bytes()
+    valid = run({}, "VERIFIED", 1)
+    evidence = json.loads(Path(valid["report"]["receipt"]).read_bytes())
+    assert valid["task"] == stale["task"] and evidence["paths"] == ["candidate"]
+    assert evidence["baselineHash"] == original["baselineHash"] and (path / "baseline.json").read_bytes() == baseline
+    assert evidence["integration"]["baseline"] == original["tools"]["integration"] != evidence["integration"]["verified"]
+    assert any(check["name"] == "plan: candidate 1" and check["status"] == "PASS" for check in evidence["checks"])
+    assert stale["report"]["receipt"] != valid["report"]["receipt"]
+
+    oracle.write_text("changed")
+    result = subprocess.run([*command, "/deadlion verify"], cwd=source, env=options,
+                            text=True, capture_output=True, check=True, timeout=20)
+    last = max(path.glob("gate-*.json"), key=lambda file: file.stat().st_mtime_ns)
+    evidence = json.loads(last.read_bytes())
+    assert evidence["status"] == "NOT VERIFIED" and "verification inputs" in evidence["checks"][0]["reason"], result
 
 
 def scope_approval(root, server):
@@ -294,7 +379,9 @@ if __name__ == "__main__":
                           ("replan", lambda root, server: campaign(root, server, True)),
                           ("dirty-checkpoint", lambda root, server: campaign(root, server, dirty=True)),
                           ("budget", budget_resume), ("native-goal", native_goal), ("scope-approval", scope_approval),
-                          ("native-goal-awaiting-approval", lambda root, server: native_goal(root, server, True))):
+                          ("native-goal-awaiting-approval", lambda root, server: native_goal(root, server, True)),
+                          ("native-goal-verifier-upgrade", lambda root, server: native_goal(root, server, verifier_changed=True)),
+                          ("verifier-upgrade", verifier_upgrade)):
             with tempfile.TemporaryDirectory(prefix="slopzero-") as temporary:
                 run(Path(temporary), transport)
                 print("PASSED", name)

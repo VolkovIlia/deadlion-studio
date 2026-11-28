@@ -10,7 +10,7 @@ import threading
 from omp_engineering_smoke import PLUGIN, Transport, fixture, trial
 
 
-def environment(root, server):
+def environment(root, server, plugin=PLUGIN):
     profile, source = fixture.setup(root, server.server_port)
     config = profile / "config.yml"
     config.write_text(config.read_text() + "startup:\n  setupWizard: false\n")
@@ -18,7 +18,7 @@ def environment(root, server):
            "PI_CODING_AGENT_DIR": str(profile), "XDG_STATE_HOME": str(root / "state"),
            "FIXTURE_API_KEY": "unused"}
     env.pop("DL_ENGINEERING_POLICY", None)
-    subprocess.run(["omp", "plugin", "link", PLUGIN], cwd=source, env=env, check=True, capture_output=True)
+    subprocess.run(["omp", "plugin", "link", plugin], cwd=source, env=env, check=True, capture_output=True)
     return source, env
 
 

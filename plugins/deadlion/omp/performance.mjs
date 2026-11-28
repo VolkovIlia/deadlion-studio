@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { commands } from "./commands.mjs";
 import { join, relative, resolve } from "node:path";
-import { digest, incremental, openTask, persist, read, restoreTask, resumeTask, save, stateHome } from "./evidence.mjs";
+import { incremental, openTask, persist, read, restoreTask, resumeTask, save, stateHome } from "./evidence.mjs";
 import { editPaths, feedback, lspObservation } from "./diagnostics.mjs";
 import { diagnostics, hover } from "./lsp.mjs";
 import { design, permitsDesignTool } from "./design.mjs";
@@ -14,7 +14,7 @@ import { interrupted, needsNewTask, outcome, rejectPrompt, resolveTaskInput, res
 import { budgetStatus, chargeAnalysis, chargeTokens, exhausted, limit, migrateExecution, timeLeft, updateBudget } from "./execution.mjs";
 import { awaitsApproval, recoveryDecision, recoveryMessage } from "./recovery.mjs";
 import { advanceMission, commitMission, continueAfterFailure } from "./mission.mjs";
-import { hashTree, measureBaseline, registerVerifier } from "./task-verification.mjs";
+import { hashTree, measureBaseline, registerVerifier, reusableReceipt } from "./task-verification.mjs";
 
 // Factories are rebound by OMP. Use a shared lookup only for unambiguous
 // parent identities in this process. The main gate always checks disk again.
@@ -27,7 +27,7 @@ function locateParent(ctx) {
 
 const entry = "deadlion.engineering.task";
 const transitionEntry = "deadlion.engineering.transition";
-const terminal = new Set(["VERIFIED", "BLOCKED", "AWAITING_APPROVAL", "CANCELLED", "INCOMPLETE"]);
+const terminal = new Set(["VERIFIED", "BLOCKED", "AWAITING_APPROVAL", "AWAITING_RESTART", "CANCELLED", "INCOMPLETE"]);
 
 class EngineeringSession {
   constructor(pi) {
@@ -215,7 +215,7 @@ class EngineeringSession {
     return { message: { customType: "deadlion.policy", display: false,
       content: `Deadlion ${task.mode} (${task.kind}). Correctness, safety and approved resource limits take priority over simplicity. ` +
       `Use applicable ${skills} skills. Check algorithm, data structures, repeated work, allocations and invariants. ` +
-      "While verification awaits operator approval, continue authorized independent work. Keep the pending acceptance visible. " +
+      "Continue authorized independent work while verification awaits approval or a verifier restart. Keep the pending acceptance visible. " +
       (task.designIssue ?? "Supply executable evidence.") + " " + milestonePrompt(task.refactor?.step) } };
   }
 
@@ -425,12 +425,7 @@ class EngineeringSession {
   async finalEvidence(task, signal) {
     const previous = this.verified.get(task.id);
     this.verified.delete(task.id);
-    if (!task.refactor && previous && !signal?.aborted && !task.policy.semgrepConfig && !exhausted(task) &&
-        previous.source === await hashTree(task) &&
-        previous.receiptHash === digest(JSON.stringify(await read(previous.receipt)))) {
-      await verifyToolInputs(task, { signal });
-      if (!signal?.aborted) return previous;
-    }
+    if (!exhausted(task) && await reusableReceipt(task, previous, signal)) return previous;
     return verify(task, signal, 20000, this.semanticProbe(task));
   }
 
@@ -457,16 +452,23 @@ class EngineeringSession {
   }
 
   async correction(task, event, ctx) {
-    if (!event.signal?.aborted && !exhausted(task) && awaitsApproval(task.last)) {
-      const next = await continueAfterFailure(this, task, ctx, task.last.failures[0].reason);
-      if (next) return next;
-      task.state = "AWAITING_APPROVAL";
-      return outcome(task, ctx);
+    const canContinue = !event.signal?.aborted && !exhausted(task);
+    if (canContinue) {
+      if (task.last.failures?.some(check => check.restartRequired)) {
+        task.state = "AWAITING_RESTART";
+        return outcome(task, ctx);
+      }
+      if (awaitsApproval(task.last)) {
+        const next = await continueAfterFailure(this, task, ctx, task.last.failures[0].reason);
+        if (next) return next;
+        task.state = "AWAITING_APPROVAL";
+        return outcome(task, ctx);
+      }
     }
     const recovery = recoveryDecision(task, task.last);
-    if (event.signal?.aborted || exhausted(task) || task.corrections >= limit(task.maxCorrections) ||
+    if (!canContinue || task.corrections >= limit(task.maxCorrections) ||
         recovery.repeatedState || recovery.cycle || recovery.strategy === "DEFER") {
-      if (!event.signal?.aborted && !exhausted(task)) {
+      if (canContinue) {
         const next = await continueAfterFailure(this, task, ctx, recovery.reason);
         if (next) return next;
       }

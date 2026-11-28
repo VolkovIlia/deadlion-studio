@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import performance from '../plugins/deadlion/omp/performance.mjs';
+import { resolveTaskInput } from '../plugins/deadlion/omp/task-input.mjs';
 
 async function scenario(t, { moved = false, accept = true, mode = 'tui', corrupt = false, refactor } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dl-input-'));
@@ -66,3 +67,10 @@ for (const options of [{ mode: 'print' }, { moved: true, corrupt: true }, { refa
     assert.equal(state.aborts, 1);
     assert.equal(branch.length, 1);
   });
+
+test('legacy verifier drift permits the next prompt in the same OMP session', async () => {
+  const task = { cwd: '/checkout', state: 'BLOCKED', last: { reason: 'verification inputs, analyzer installation or Core changed' } };
+  const ctx = { mode: 'tui', cwd: task.cwd, ui: { confirm() { assert.fail('continuing should need no confirmation'); } } };
+  const input = await resolveTaskInput(task, ctx, undefined, true, new Set(['BLOCKED']));
+  assert.equal(input.selection, 'continue');
+});

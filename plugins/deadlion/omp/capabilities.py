@@ -171,9 +171,20 @@ def discover_tests(root, paths, manifests):
     return suites
 
 
+def integration_digest():
+    digest = hashlib.sha256()
+    for path in sorted(Path(__file__).resolve().parent.iterdir()):
+        if path.is_file():
+            digest.update(path.name.encode() + b"\0" + path.read_bytes())
+    return digest.hexdigest()
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--discover"]:
         print(json.dumps(discover()))
+        sys.exit(0)
+    if sys.argv[1:] == ["--integration"]:
+        print(integration_digest())
         sys.exit(0)
     core = Path(__file__).resolve().parents[1] / "skills"
     h = hashlib.sha256()
@@ -181,13 +192,9 @@ if __name__ == "__main__":
         for path in sorted((core / parent).rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts:
                 h.update(str(path.relative_to(core)).encode() + b"\0" + path.read_bytes())
-    integration = hashlib.sha256()
-    for path in sorted(Path(__file__).resolve().parent.iterdir()):
-        if path.is_file():
-            integration.update(path.name.encode() + b"\0" + path.read_bytes())
     binary = shutil.which("omp")
     version = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=2).stdout.strip() if binary else None
     policy = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
-    print(json.dumps(dict(core=h.hexdigest(), integration=integration.hexdigest(), inputs=approval_inputs(policy),
+    print(json.dumps(dict(core=h.hexdigest(), integration=integration_digest(), inputs=approval_inputs(policy),
                           tools=inventory(policy.get("projectVenv", ".venv")),
                           omp=version)))

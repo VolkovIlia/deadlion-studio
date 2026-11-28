@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.4] - 2026-11-28
+
+- Keep the OMP Goal active when the installed verifier changes during a turn. Record `AWAITING_RESTART · NOT VERIFIED` without a forced corrective turn.
+- Resume the existing task after reloading the updated plugin. If the Core, analyzers, inputs and approvals match, run fresh checks against the original baseline and record both integration fingerprints. Cached and campaign final receipts must match the loaded verifier. [Resume after an update](docs/omp-recovery.md#resume-after-a-plugin-update)
+
 ## [4.6.3] - 2026-11-28
 
 - Record missing scope approval and unreviewed test revisions as `AWAITING_APPROVAL · NOT VERIFIED`. Keep the native OMP Goal available for authorized independent work.
@@ -79,7 +84,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.3...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.4...HEAD
+[4.6.4]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4
 [4.6.3]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3
 [4.6.2]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.2
 [4.6.1]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.1

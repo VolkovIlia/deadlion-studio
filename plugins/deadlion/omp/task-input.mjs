@@ -6,12 +6,13 @@ export function showTaskStatus(ctx, ...rows) {
 }
 
 export async function outcome(task, ctx) {
-  const reason = task.blocker || task.last?.failures?.[0]?.reason || task.last?.reason;
+  const restart = task.last?.failures?.find(check => check.restartRequired);
+  const reason = task.blocker || restart?.reason || task.last?.failures?.[0]?.reason || task.last?.reason;
   const verified = task.state === 'VERIFIED';
   const subject = task.refactor ? 'Deadlion milestone ' + task.refactor.id : 'Deadlion';
   const summary = `${subject} ${task.state} · ${task.last?.status ?? 'NOT VERIFIED'}`;
   if (verified) showTaskStatus(ctx);
-  else showTaskStatus(ctx, summary, reason ?? 'See /deadlion report.', task.state === 'AWAITING_APPROVAL'
+  else showTaskStatus(ctx, summary, reason ?? 'See /deadlion report.', ['AWAITING_APPROVAL', 'AWAITING_RESTART'].includes(task.state)
     ? 'Independent work can continue in this session.' : 'Send a message to choose the next step.');
   await persist(task);
   ctx.ui?.notify([summary, reason, task.last?.receipt ?? task.directory].filter(Boolean).join('\n'),
@@ -34,7 +35,9 @@ export async function resolveTaskInput(task, ctx, selection, newRequest, termina
   if (!task || !newRequest) return { selection };
   const expired = exhausted(task);
   const moved = task.cwd !== ctx.cwd;
-  const recoverable = (task.state === 'AWAITING_APPROVAL' || task.state === 'BLOCKED' && task.recovery) && !expired;
+  const legacyVerifier = (task.last?.reason ?? task.last?.failures?.[0]?.reason) === 'verification inputs, analyzer installation or Core changed';
+  const recoverable = (['AWAITING_APPROVAL', 'AWAITING_RESTART'].includes(task.state) ||
+    task.state === 'BLOCKED' && (task.recovery || legacyVerifier)) && !expired;
   if (needsConfirmation(task, ctx, { selection, expired, moved, recoverable, terminal })) {
     await confirmNewTask(task, ctx, expired);
     return { selection: 'new', expired };

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { execute } from "./process.mjs";
-import { approvalHash, digest, persist, read, save, scripts, snapshot } from "./evidence.mjs";
+import { digest, persist, read, save, scripts, snapshot } from "./evidence.mjs";
+import { verifyToolInputs } from "./gate.mjs";
 import { chargeAnalysis, operationTimeout, timeLeft } from "./execution.mjs";
 import { scalingSummary } from "./diagnostics.mjs";
 import { design } from "./design.mjs";
@@ -10,9 +11,21 @@ import { awaitsApproval } from "./recovery.mjs";
 
 export const hashTree = async task => digest(JSON.stringify(await snapshot(task.cwd)));
 
+export async function reusableReceipt(task, report, signal) {
+  if (!report || task.refactor || task.policy.semgrepConfig || signal?.aborted) return false;
+  try {
+    const evidence = await read(report.receipt);
+    if (report.receiptHash !== digest(JSON.stringify(evidence)) || report.source !== await hashTree(task)) return false;
+    const tools = await verifyToolInputs(task, { signal });
+    return !signal?.aborted && evidence.toolIdentity === digest(JSON.stringify(tools));
+  } catch {
+    return false;
+  }
+}
+
 export async function measureBaseline(task, signal) {
   const original = await read(join(task.directory, "baseline.json"));
-  if (task.approvalHash !== await approvalHash(task)) throw new Error("approved fixtures changed");
+  await verifyToolInputs(task, { signal });
   const current = await snapshot(task.cwd);
   if (digest(JSON.stringify(original.files)) !== digest(JSON.stringify(current.files)))
     throw new Error("baseline measurement needs the original working tree");
@@ -27,6 +40,7 @@ export async function measureBaseline(task, signal) {
   }
   const data = JSON.parse(result.stdout);
   if (digest(JSON.stringify(current)) !== await hashTree(task)) throw new Error("workspace changed during baseline measurement");
+  await verifyToolInputs(task, { signal });
   const receipt = join(task.directory, "initial-measurement.json");
   await save(receipt, data);
   if (!["VERIFIED", "PERFORMANCE REGRESSION"].includes(data.status)) throw new Error("baseline: " + data.status);

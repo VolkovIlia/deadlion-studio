@@ -11,6 +11,7 @@ import { executionLimits, exhausted, migrateExecution, timeLeft } from "./execut
 export const scripts = fileURLToPath(new URL("../skills/performance/scripts/", import.meta.url));
 export const limits = fileURLToPath(new URL("../skills/suckless-code/scripts/", import.meta.url));
 const workspace = fileURLToPath(new URL("workspace.py", import.meta.url));
+const capabilities = fileURLToPath(new URL("capabilities.py", import.meta.url));
 export const digest = data => createHash("sha256").update(data).digest("hex");
 export const stateHome = () => join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "deadlion");
 
@@ -28,11 +29,16 @@ export async function snapshot(cwd, options = {}) {
 }
 
 export async function inventory(cwd, policy = {}, options = {}) {
-  const helper = fileURLToPath(new URL("capabilities.py", import.meta.url));
-  const result = await execute(["python3", "-I", helper, JSON.stringify(policy)], { ...options, cwd,
+  const result = await execute(["python3", "-I", capabilities, JSON.stringify(policy)], { ...options, cwd,
     timeout: Math.min(3000, options.timeout ?? 3000) });
   if (result.code) throw new Error(result.stderr);
   return JSON.parse(result.stdout);
+}
+
+export async function integrationFingerprint() {
+  const result = await execute(["python3", "-I", capabilities, "--integration"], { timeout: 3000 });
+  if (result.code) throw new Error("Cannot identify the loaded Deadlion verifier");
+  return result.stdout.trim();
 }
 
 export async function incremental(task, signal) {

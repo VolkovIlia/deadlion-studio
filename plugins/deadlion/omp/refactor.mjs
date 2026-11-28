@@ -237,8 +237,11 @@ export async function refactorStatus(ctx, report = false, validate) {
   });
   const evidence = final?.receipt && await read(final.receipt);
   const plan = await planSource(root, current.path);
-  const { status, staleInputs } = await finalReceiptStatus(current, plan.planHash, source, final, evidence,
-    async () => validate(await finalRefactorTask(ctx), { timeout: 5000 }));
+  const { status, staleInputs } = await finalReceiptStatus(current, plan.planHash, source, final, evidence, async () => {
+    const tools = await validate(await finalRefactorTask(ctx), { timeout: 5000 });
+    if (evidence.toolIdentity !== digest(JSON.stringify(tools)))
+      throw new Error("The final receipt predates the loaded verifier. Run /deadlion refactor verify.");
+  });
   const result = join(directory, "comparison.json");
   await save(result, { status, base: baseline.baseline.base, source,
     changes: changedArea(files, { ...baseline.baseline.files, ...tree.files }), baselineStatus: baseline.baselineStatus,
