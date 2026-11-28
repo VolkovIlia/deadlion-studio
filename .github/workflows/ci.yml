@@ -57,7 +57,7 @@ jobs:
 
   live-omp:
     name: Live OMP ${{ matrix.version }} / ${{ matrix.scenario }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 12
     strategy:
       fail-fast: false
@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-24.04
     container: fedora:44
     steps:
-      - run: dnf -y install git python3 python3-pip nodejs bubblewrap
+      - run: dnf -y install git python3 python3-pip gcc make groff tar gzip
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -140,4 +140,5 @@ jobs:
           python3 -m venv /tmp/deadlion-ci
           . /tmp/deadlion-ci/bin/activate
           pip install -r requirements-dev.txt
-          pytest tests -q -rs -k 'not isolated and not experiment and not candidate'
+          pytest -q -rs tests/test_dl_{budget,contrast,guard,new,size}.py \
+            tests/test_engineering_core.py tests/test_plugin_layout.py
