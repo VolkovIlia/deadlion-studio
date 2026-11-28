@@ -87,7 +87,7 @@ The structural ratchet allows a pre-existing over-limit metric to improve or rem
 
 ## CI and experimental evidence
 
-The CI workflow pins OMP release binaries by SHA256. Live checks exercise the real harness with a loopback scripted provider, including RPC, lifecycle, LSP, Evolution, Autoresearch and refactoring. A failed Linux isolation preflight reports `UNSUPPORTED` and fails the live job. Branch rules determine which checks are required for merging. The pull-request performance workflow uses the evaluator from the trusted base revision. [GitHub Actions](https://github.com/VolkovIlia/deadlion-studio/actions/workflows/ci.yml)
+The CI workflow pins OMP release binaries by SHA256. Live checks exercise the real harness with a loopback scripted provider, including RPC, lifecycle, LSP, Evolution, Autoresearch and refactoring. The isolation preflight fails the job when the base isolation layer is unavailable. Evolution and Autoresearch report `UNSUPPORTED` and skip the test step if hosted runners lack nested namespaces or a delegated CPU quota. Run those checks on a Fedora host with cgroup v2 and a user systemd manager. Branch rules determine which checks are required for merging. The pull-request performance workflow uses the evaluator from the trusted base revision. [GitHub Actions](https://github.com/VolkovIlia/deadlion-studio/actions/workflows/ci.yml)
 
 For a real-model comparison, run the scripts from a Git checkout with access to the 4.5.0 baseline. Start an approved local inference server and use a new output directory.
 
