@@ -140,5 +140,5 @@ jobs:
           python3 -m venv /tmp/deadlion-ci
           . /tmp/deadlion-ci/bin/activate
           pip install -r requirements-dev.txt
-          pytest -q -rs tests/test_dl_{budget,contrast,guard,new,size}.py \
-            tests/test_engineering_core.py tests/test_plugin_layout.py
+          pytest -q -rs tests/test_dl_budget.py tests/test_dl_contrast.py tests/test_dl_guard.py \
+            tests/test_dl_new.py tests/test_dl_size.py tests/test_engineering_core.py tests/test_plugin_layout.py
