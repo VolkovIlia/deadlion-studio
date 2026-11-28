@@ -33,16 +33,40 @@ compare implementations against a fixed workload, correctness oracle and resourc
 
 ### OMP
 
-Clone the tagged release and link the package in your OMP user profile. Keep the checkout at this location while it is linked.
+Install from the official Marketplace in a fresh OMP profile.
 
 ```sh
-git clone --branch v4.6.4 --depth 1 https://github.com/VolkovIlia/deadlion-studio.git
-omp plugin link "$PWD/deadlion-studio/plugins/deadlion"
-cd /path/to/your/project
-omp
+omp plugin marketplace add VolkovIlia/deadlion-studio &&
+omp plugin install --scope user deadlion@deadlion-studio
+omp plugin list
 ```
 
-Run `/deadlion setup` to inspect recommended checks and approve the functional scope of discovered tests. Use `/deadlion doctor` to inspect compatibility and available tools. For CI, `dl-omp --seconds N` bounds the run and returns exit code 0 after validating the receipt and current workspace. Remove a user link with `omp plugin uninstall deadlion-studio`. [Verification approval](docs/omp-recovery.md#verification-approval)
+Look for `deadlion@deadlion-studio (4.6.4) (user)` under Marketplace Plugins. For an existing Marketplace install, run the following from the target project and restart OMP when the upgrade finishes.
+
+```sh
+omp plugin marketplace update deadlion-studio &&
+omp plugin upgrade deadlion@deadlion-studio
+```
+
+If the catalog still offers an older version, check its source with `omp plugin marketplace list`. Updating a registered marketplace refreshes its existing source. The following commands replace a stale or local `deadlion-studio` registration with the official source.
+
+```sh
+omp plugin marketplace remove deadlion-studio &&
+omp plugin marketplace add VolkovIlia/deadlion-studio &&
+omp plugin discover deadlion-studio
+```
+
+Run `omp plugin upgrade deadlion@deadlion-studio` again if Deadlion is already installed from Marketplace.
+
+If you previously used `omp plugin link`, OMP lists `deadlion-studio@4.6.4` under npm Plugins. Before switching that installation to Marketplace, confirm `omp plugin discover deadlion-studio` offers the expected release. Then replace the link with the Marketplace installation.
+
+```sh
+omp plugin uninstall deadlion-studio &&
+omp plugin install --scope user deadlion@deadlion-studio &&
+omp plugin list
+```
+
+Start OMP in your project. Run `/deadlion setup` to inspect recommended checks and approve the functional scope of discovered tests, or `/deadlion doctor` to inspect compatibility and available tools. For CI, `dl-omp --seconds N` bounds the run and returns exit code 0 after validating the receipt and current workspace. [Verification approval](docs/omp-recovery.md#verification-approval)
 
 ### Claude Code
 

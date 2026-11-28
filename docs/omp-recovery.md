@@ -1,6 +1,6 @@
 # SlopZero engineering recovery in OMP
 
-Use the tagged `v4.6.4` checkout or verify the release archive with `sha256sum -c deadlion-studio-4.6.4.tar.gz.sha256` before extraction. Link the `plugins/deadlion` directory with `omp plugin link` and restart OMP. [4.6.4 downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4)
+Use the [OMP Marketplace instructions](../README.md#omp) for installation and upgrades. For a locally linked release, verify the archive with `sha256sum -c deadlion-studio-4.6.4.tar.gz.sha256`, extract it and link its `plugins/deadlion` directory with `omp plugin link`. Restart OMP after updating either installation. [4.6.4 downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4)
 
 ## OMP ownership and integration
 

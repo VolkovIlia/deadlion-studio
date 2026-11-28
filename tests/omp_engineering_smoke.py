@@ -419,6 +419,50 @@ def harness_scenarios(source, env, server, policy, trace):
             "agent_start", "agent_end", "before_agent_start", "tool_result", "turn_start", "turn_end"} <= {e[0] for e in events}
 
 
+def marketplace_installation(plugin, source, env, server):
+    marketplace = "deadlion-studio"
+    plugin_id = "deadlion@" + marketplace
+    catalog_path = Path(".claude-plugin/marketplace.json")
+    catalog = json.loads((fixture.ROOT / catalog_path).read_bytes())
+    entry = next(item for item in catalog["plugins"] if item["name"] == "deadlion")
+    current_version = entry["version"]
+    stale = source.parent / "stale-marketplace"
+    package = stale / entry["source"]
+    shutil.copytree(PLUGIN, package, ignore=shutil.ignore_patterns("__pycache__"))
+    for metadata in (package / "package.json", package / ".claude-plugin/plugin.json"):
+        record = json.loads(metadata.read_bytes())
+        metadata.write_text(json.dumps({**record, "version": "4.6.2"}))
+    (stale / catalog_path).parent.mkdir()
+    (stale / catalog_path).write_text(json.dumps({**catalog, "plugins": [{**entry, "version": "4.6.2"}]}))
+
+    plugin("marketplace", "add", str(stale))
+    plugin("marketplace", "update", marketplace)
+    assert "deadlion@4.6.2" in plugin("discover", marketplace).stdout
+    duplicate = plugin("marketplace", "add", str(fixture.ROOT), check=False)
+    assert duplicate.returncode and "already exists" in duplicate.stderr, duplicate
+    collision = plugin("install", "--dry-run", plugin_id, check=False)
+    assert collision.returncode and "conflicts with installed package" in collision.stderr, collision
+    plugin("uninstall", marketplace)
+    plugin("install", plugin_id)
+    assert "4.6.2" in plugin("list").stdout
+
+    plugin("marketplace", "remove", marketplace)
+    plugin("marketplace", "add", str(fixture.ROOT))
+    assert f"deadlion@{current_version}" in plugin("discover", marketplace).stdout
+    plugin("upgrade", plugin_id)
+    installed = json.loads(plugin("list", "--json").stdout)
+    assert not installed["npm"] and len(installed["marketplace"]) == 1, installed
+    installed_plugin, = installed["marketplace"]
+    assert installed_plugin["id"] == plugin_id and installed_plugin["scope"] == "user", installed
+    installed_entry, = installed_plugin["entries"]
+    assert installed_entry["version"] == current_version, installed
+    installed_package = Path(installed_entry["installPath"])
+    assert json.loads((installed_package / "package.json").read_bytes())["version"] == current_version
+    assert (installed_package / "omp/performance.mjs").read_bytes() == (PLUGIN / "omp/performance.mjs").read_bytes()
+    trial(source, env, server, {}, "VERIFIED", 1)
+    plugin("uninstall", "--scope", "user", plugin_id)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp, HTTPServer(("127.0.0.1", 0), Transport) as server:
         directory = Path(tmp)
@@ -436,9 +480,9 @@ def main():
         trace = directory / "events.jsonl"
         env["DL_TEST_TRACE"] = str(trace)
         other = neighbour(profile, trace)
-        def plugin(*args):
+        def plugin(*args, check=True):
             return subprocess.run(["omp", "plugin", *args], cwd=source, env=env,
-                                  capture_output=True, text=True, check=True)
+                                  capture_output=True, text=True, check=check)
         plugin("link", str(PLUGIN))
         plugin("link", str(PLUGIN))
         harness_scenarios(source, env, server, policy, trace)
@@ -459,8 +503,7 @@ def main():
         interrupted(source, env, server, trace, crash=False)
         if os.environ.get("DL_TEST_TUI"):
             interactive(source, env, server)
-        plugin("uninstall", "deadlion-studio")
-        plugin("marketplace", "add", str(fixture.ROOT))
+        marketplace_installation(plugin, source, env, server)
         plugin("install", "--scope", "project", "deadlion@deadlion-studio")
         trial(source, env, server, {}, "VERIFIED", 1)
         plugin("upgrade", "deadlion@deadlion-studio")

@@ -93,6 +93,10 @@ def test_marketplace_sources_match_plugins():
         assert source.is_dir(), entry["source"]
         manifest = json.loads((source / ".claude-plugin" / "plugin.json").read_text())
         assert manifest["name"] == entry["name"]
+        assert manifest["version"] == entry["version"]
+        package = source / "package.json"
+        if package.exists():
+            assert json.loads(package.read_text())["version"] == entry["version"]
 
 
 def test_every_plugin_is_listed():
