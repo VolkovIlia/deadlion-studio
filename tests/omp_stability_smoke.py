@@ -49,12 +49,12 @@ def coverage(source, env, server):
     make_component(source, "backend", 42)
     (source / "schemas").mkdir()
     approve(source, env, ["frontend"])
-    report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 0;\n")}, "BLOCKED", None)
+    report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 0;\n")}, "AWAITING_APPROVAL", 2)
     assert report["coverage"][0]["status"] == "NOT VERIFIED"
     assert any(c["status"] == "PASS" and c["coverage"]["paths"] == ["frontend"]
                for c in report["checks"] if c["name"].startswith("plan:"))
     (source / "backend/logic.cjs").write_text("module.exports = 42;\n")
-    report = trial(source, env, server, {0: write("schemas/shared.proto", 'syntax = "proto3";\n')}, "BLOCKED", None)
+    report = trial(source, env, server, {0: write("schemas/shared.proto", 'syntax = "proto3";\n')}, "AWAITING_APPROVAL", 2)
     assert report["coverage"][0]["affectedComponents"] == ["backend", "frontend"]
     approve(source, env, ["frontend", "backend"])
     report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 42; // preserved\n")}, "VERIFIED", None)

@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.3] - 2026-11-28
+
+- Record missing scope approval and unreviewed test revisions as `AWAITING_APPROVAL · NOT VERIFIED`. Keep the native OMP Goal available for authorized independent work.
+- Approve scoped checks and a reviewed test revision in the existing standalone task with `/deadlion approve-tests`. Retain the original baseline and run a fresh verification for acceptance.
+- Remove implicit interactive task budgets. Preserve explicit limits and require `--seconds` for unattended `dl-omp` runs.
+- Recover from local verification failures and continue ready independent milestones when the checkout matches its checkpoint. [OMP recovery, migration and verification](docs/omp-recovery.md)
+
 ## [4.6.2] - 2026-11-28
 
 - Show request preparation and the reason for a stopped task in the OMP composer. A message sent after a stop or checkout change can start a fresh task with confirmation, without renewing the previous budget.
@@ -72,7 +79,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.2...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.3...HEAD
+[4.6.3]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3
 [4.6.2]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.2
 [4.6.1]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.1
 [4.6.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.0

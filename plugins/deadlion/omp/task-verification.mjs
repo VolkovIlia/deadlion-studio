@@ -6,6 +6,7 @@ import { scalingSummary } from "./diagnostics.mjs";
 import { design } from "./design.mjs";
 import { adoptTechnicalPlan } from "./refactor-plan.mjs";
 import { advanceMission } from "./mission.mjs";
+import { awaitsApproval } from "./recovery.mjs";
 
 export const hashTree = async task => digest(JSON.stringify(await snapshot(task.cwd)));
 
@@ -48,7 +49,8 @@ export function registerVerifier(pi, controller) {
       if (args?.action === "replan") return replan(controller, task, ctx, args);
       const report = await controller.fullCheck(task, signal, ctx);
       const { status, receipt, scaling, failures } = report;
-      return { content: [{ type: "text", text: JSON.stringify({ status, receipt, scaling, failures: failures?.slice(0, 5) }) }],
+      const guidance = awaitsApproval(report) ? "Acceptance awaits operator approval. Continue authorized independent work." : undefined;
+      return { content: [{ type: "text", text: JSON.stringify({ status, receipt, scaling, guidance, failures: failures?.slice(0, 5) }) }],
         details: { receipt } };
     },
   });

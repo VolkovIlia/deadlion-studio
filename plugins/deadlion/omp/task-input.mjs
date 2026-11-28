@@ -11,7 +11,8 @@ export async function outcome(task, ctx) {
   const subject = task.refactor ? 'Deadlion milestone ' + task.refactor.id : 'Deadlion';
   const summary = `${subject} ${task.state} · ${task.last?.status ?? 'NOT VERIFIED'}`;
   if (verified) showTaskStatus(ctx);
-  else showTaskStatus(ctx, summary, reason ?? 'See /deadlion report.', 'Send a message to choose the next step.');
+  else showTaskStatus(ctx, summary, reason ?? 'See /deadlion report.', task.state === 'AWAITING_APPROVAL'
+    ? 'Independent work can continue in this session.' : 'Send a message to choose the next step.');
   await persist(task);
   ctx.ui?.notify([summary, reason, task.last?.receipt ?? task.directory].filter(Boolean).join('\n'),
     verified ? 'info' : 'warning');
@@ -33,7 +34,7 @@ export async function resolveTaskInput(task, ctx, selection, newRequest, termina
   if (!task || !newRequest) return { selection };
   const expired = exhausted(task);
   const moved = task.cwd !== ctx.cwd;
-  const recoverable = task.state === 'BLOCKED' && task.recovery && !expired;
+  const recoverable = (task.state === 'AWAITING_APPROVAL' || task.state === 'BLOCKED' && task.recovery) && !expired;
   if (needsConfirmation(task, ctx, { selection, expired, moved, recoverable, terminal })) {
     await confirmNewTask(task, ctx, expired);
     return { selection: 'new', expired };

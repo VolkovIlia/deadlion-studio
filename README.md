@@ -8,7 +8,7 @@ Deadlion Studio provides an engineering workflow for OMP, Claude Code and Codex.
 The core plugin takes a project from design to release. Its performance tools
 compare implementations against a fixed workload, correctness oracle and resource budget.
 
-**Deadlion Studio 4.6.2** shows when OMP is preparing or running a request and preserves unsent input after a task stops. [Release downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.2) · [Scoped verification and campaign migration](docs/omp-4.6.1.md)
+**Deadlion Studio 4.6.3** keeps the native OMP Goal active while scoped verification awaits operator approval. Independent work can continue with the same task ID. [Release downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3) · [OMP recovery and migration](docs/omp-recovery.md)
 
 `dl-perf scale` measures how runtime, memory and operation counts change across input sizes and distributions. It reports which growth models fit the measured range and where the evidence cannot distinguish between them.
 
@@ -36,15 +36,13 @@ compare implementations against a fixed workload, correctness oracle and resourc
 Clone the tagged release and link the package in your OMP user profile. Keep the checkout at this location while it is linked.
 
 ```sh
-git clone --branch v4.6.2 --depth 1 https://github.com/VolkovIlia/deadlion-studio.git
+git clone --branch v4.6.3 --depth 1 https://github.com/VolkovIlia/deadlion-studio.git
 omp plugin link "$PWD/deadlion-studio/plugins/deadlion"
 cd /path/to/your/project
 omp
 ```
 
-Run `/deadlion setup` to inspect recommended checks and explicitly approve the functional scope of discovered tests. Use `/deadlion doctor` to inspect compatibility and available tools. For CI, `dl-omp` returns exit code 0 only after validating the receipt and current workspace. Remove a user link with `omp plugin uninstall deadlion-studio`. [Scoped functional verification](docs/omp-4.6.1.md#scoped-functional-verification)
-
-For development builds, see the [engineering recovery and budget guide](docs/omp-recovery.md).
+Run `/deadlion setup` to inspect recommended checks and approve the functional scope of discovered tests. Use `/deadlion doctor` to inspect compatibility and available tools. For CI, `dl-omp --seconds N` bounds the run and returns exit code 0 after validating the receipt and current workspace. Remove a user link with `omp plugin uninstall deadlion-studio`. [Verification approval](docs/omp-recovery.md#verification-approval)
 
 ### Claude Code
 

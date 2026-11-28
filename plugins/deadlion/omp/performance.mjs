@@ -12,7 +12,7 @@ import { authorizeRefactorTool, bindMilestone, completeMilestone, milestonePromp
 import { activateMilestone, loadReservedTask, parkMilestone, saveMissionBudget } from "./refactor-state.mjs";
 import { interrupted, needsNewTask, outcome, rejectPrompt, resolveTaskInput, resumeInput, showTaskStatus } from "./task-input.mjs";
 import { budgetStatus, chargeAnalysis, chargeTokens, exhausted, limit, migrateExecution, timeLeft, updateBudget } from "./execution.mjs";
-import { recoveryDecision, recoveryMessage } from "./recovery.mjs";
+import { awaitsApproval, recoveryDecision, recoveryMessage } from "./recovery.mjs";
 import { advanceMission, commitMission, continueAfterFailure } from "./mission.mjs";
 import { hashTree, measureBaseline, registerVerifier } from "./task-verification.mjs";
 
@@ -27,7 +27,7 @@ function locateParent(ctx) {
 
 const entry = "deadlion.engineering.task";
 const transitionEntry = "deadlion.engineering.transition";
-const terminal = new Set(["VERIFIED", "BLOCKED", "CANCELLED", "INCOMPLETE"]);
+const terminal = new Set(["VERIFIED", "BLOCKED", "AWAITING_APPROVAL", "CANCELLED", "INCOMPLETE"]);
 
 class EngineeringSession {
   constructor(pi) {
@@ -215,6 +215,7 @@ class EngineeringSession {
     return { message: { customType: "deadlion.policy", display: false,
       content: `Deadlion ${task.mode} (${task.kind}). Correctness, safety and approved resource limits take priority over simplicity. ` +
       `Use applicable ${skills} skills. Check algorithm, data structures, repeated work, allocations and invariants. ` +
+      "While verification awaits operator approval, continue authorized independent work. Keep the pending acceptance visible. " +
       (task.designIssue ?? "Supply executable evidence.") + " " + milestonePrompt(task.refactor?.step) } };
   }
 
@@ -456,6 +457,12 @@ class EngineeringSession {
   }
 
   async correction(task, event, ctx) {
+    if (!event.signal?.aborted && !exhausted(task) && awaitsApproval(task.last)) {
+      const next = await continueAfterFailure(this, task, ctx, task.last.failures[0].reason);
+      if (next) return next;
+      task.state = "AWAITING_APPROVAL";
+      return outcome(task, ctx);
+    }
     const recovery = recoveryDecision(task, task.last);
     if (event.signal?.aborted || exhausted(task) || task.corrections >= limit(task.maxCorrections) ||
         recovery.repeatedState || recovery.cycle || recovery.strategy === "DEFER") {

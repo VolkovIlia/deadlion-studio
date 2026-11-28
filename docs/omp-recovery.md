@@ -1,6 +1,6 @@
 # SlopZero engineering recovery in OMP
 
-This change builds on Deadlion Studio `v4.6.2` at `b45bb3744181ab7f6b77786002485502cca904d3`. The package, state directories, and `/deadlion` command retain their existing names. The integration uses the installed OMP lifecycle, provider, task tools and session history. [4.6.2 release](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.2)
+Deadlion Studio `v4.6.3` builds on `v4.6.2` at `b45bb3744181ab7f6b77786002485502cca904d3`. Use the tagged checkout or verify the release archive with `sha256sum -c deadlion-studio-4.6.3.tar.gz.sha256` before extraction. Link the `plugins/deadlion` directory with `omp plugin link` and restart OMP. [4.6.3 downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3)
 
 ## OMP ownership and integration
 
@@ -31,6 +31,12 @@ A new passing check or an improved measured deficit relative to the recorded bes
 
 An expired technical verifier operation produces a local check failure with its actual command name and cause. It does not mark the result verified or expire the mission. The remaining analysis envelope and other applicable checks stay available. Mandatory coverage, structural ratchets, approval identity, performance contracts and final workspace fingerprints still apply.
 
+### Verification approval
+
+When the remaining verification issues require scope approval or independent review of a changed test, the task records `AWAITING_APPROVAL · NOT VERIFIED`. This status settles the current OMP turn without a corrective continuation or cancellation. Independent authorized diagnosis and implementation can continue under the same task ID and native Goal. An autonomous campaign can move a deferred milestone aside when the checkout matches its verified checkpoint. A failed approved check still follows the normal recovery flow.
+
+For a standalone task, `/deadlion approve-tests <sha256> <file.json>` records an operator-reviewed addition. Supply the SHA-256 of the approval file. A `checks` array can add named `functional` checks using the existing `DL_ENGINEERING_POLICY` check format with explicit `argv` and `scope`. To approve an existing changed test separately, use a file such as `{"testRevision":{"tests/test_candidate.py":"<reviewed file sha256>"}}`. The test's current bytes must match that digest. Existing checks, the original baseline and the approved campaign policy remain in force. A fresh verifier run is required for acceptance. Shell output alone does not provide scoped evidence.
+
 ## Campaigns, independent work and replanning
 
 Start with `/deadlion refactor start plan.md` and an approved DAG. Put an optional `Goal:` line above the milestone sections. Use `/deadlion refactor run` followed by an engineering prompt for native stop-time handoffs through that DAG. The existing `begin T1` selection remains available for explicit, single-milestone work. Its RPC result is marked with `scope: milestone`. A campaign-run RPC result is verified only after every mandatory milestone and the final cumulative gate pass.
@@ -47,6 +53,8 @@ Use `/deadlion status` for the current task, goal, milestone, budget and recent 
 
 Existing tasks retain expressly configured limits. On restore, implicit 900-second, 120-second and two-correction defaults from 4.6.2 are removed. The original approved policy, checkout baseline and recorded evidence carry forward. Add `--seconds` to unattended `dl-omp` invocations and use existing OMP session controls for supervision. An existing campaign may continue using manual milestones or opt into `refactor run` after resolving any current reservation.
 
+Verification remains tied to the verifier revision recorded when the task was opened. An unfinished task opened under an older revision can report changed verification inputs after upgrading. Same-task approvals apply when the pinned verifier and its existing inputs still match.
+
 Recovery can choose independent work when the current checkout permits a safe handoff. Automated in-place rollback of dirty candidates, reopening verified milestones, multi-worktree integration, and autonomous execution after OMP exits remain outside this implementation. Recovery depends on the provider and the active OMP session. A scoped stage or a native goal's state does not certify the whole campaign. Advanced recovery for arbitrarily incompatible architecture changes still needs a recorded technical proposal or an operator decision.
 
 ## Reproduce
@@ -61,4 +69,4 @@ python3 tests/omp_task_input_smoke.py
 
 The live recovery fixture uses OMP and scripted loopback transport. It asserts more than two productive corrections, cycle detection, operation timeout recovery, deferred and waiting stages, independent work, controlled decomposition and final verification, original baseline retention, budget extension, preservation of dirty worktrees and native Goal continuity. GitHub CI includes the recovery fixture for the two pinned OMP versions.
 
-On Fedora 44 all six recovery scenarios passed with OMP 19.2.0 and 19.2.1. In the native Goal scenario, OMP retained the same active goal after an engineering `BLOCKED` result. A follow-up passed the gate with the original task ID. The engineering and refactoring suites, TUI prompt recovery at 80 and 40 columns, and local isolated Evolution approval also passed. The unit suites reported 174 Python and 27 Node tests passing. `dl-size` and `git diff --check` passed. The hosted workflow change has not been run for this working revision.
+On Fedora 44 all eight recovery scenarios passed with OMP 19.2.0 and 19.2.1. The native Goal tests kept the same active Goal after a failed check and after `AWAITING_APPROVAL`. Independent work continued in the latter case while the engineering result remained `NOT VERIFIED`. The approval test accepted the reviewed scope and test revision in the same task, then invalidated acceptance after a subsequent test edit. TUI prompt recovery at 80 and 40 columns and local isolated Evolution approval passed in the preceding recovery validation. `dl-size` and `git diff --check` passed. [Hosted run and skipped scenarios for the tagged revision](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3)

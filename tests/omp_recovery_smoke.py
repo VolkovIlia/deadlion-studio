@@ -1,4 +1,5 @@
 """Exercise engineering recovery through real OMP and a loopback scripted provider."""
+from hashlib import sha256
 from http.server import HTTPServer
 import json
 import queue
@@ -160,13 +161,13 @@ def budget_resume(root, server):
     assert final["baselineHash"] == original["baselineHash"] and final["goal"] == original["goal"]
 
 
-def native_goal(root, server):
+def native_goal(root, server, approval_pending=False):
     source, env = environment(root, server)
     profile = Path(env["PI_CODING_AGENT_DIR"]) / "config.yml"
     with profile.open("a") as stream:
         stream.write("goal:\n  enabled: true\n  continuationModes: [rpc]\n")
     policy = root / "policy.json"
-    policy.write_text(json.dumps({"checks": [checks_for("candidate", 4)]}))
+    policy.write_text(json.dumps({} if approval_pending else {"checks": [checks_for("candidate", 4)]}))
     verdict = root / "verdict.json"
     options = {**env, "DL_ENGINEERING_POLICY": str(policy), "DL_VERDICT_FILE": str(verdict)}
     server.contracts = False
@@ -203,15 +204,23 @@ def native_goal(root, server):
         assert first["success"]
         until(lambda event: event.get("type") == "session_settled" and verdict.exists())
         failed = json.loads(verdict.read_bytes())
-        assert failed["state"] == "BLOCKED", failed
+        assert failed["state"] == ("AWAITING_APPROVAL" if approval_pending else "BLOCKED"), failed
         send(type="goal", op="get", id="goal")
         goal = until(lambda event: event.get("id") == "goal" and event.get("type") == "response")["data"]["goal"]
         assert goal["status"] == "active" and goal["id"] == first["data"]["goal"]["id"]
-        server.steps = {server.calls: write("candidate", "correct")}
+        task = write("notes.md", "# Independent work\n") if approval_pending else write("candidate", "correct")
+        server.steps = {server.calls: task}
         send(type="prompt", id="continue", message="Continue the existing OMP goal.")
         until(lambda event: event.get("type") == "session_settled")
         finished = json.loads(verdict.read_bytes())
-        assert finished["state"] == "VERIFIED" and finished["task"] == failed["task"], finished
+        assert finished["state"] == ("AWAITING_APPROVAL" if approval_pending else "VERIFIED"), finished
+        assert finished["task"] == failed["task"]
+        if approval_pending:
+            assert (source / "notes.md").is_file() and finished["report"]["status"] == "NOT VERIFIED"
+            send(type="goal", op="get", id="still-active")
+            live = until(lambda event: event.get("id") == "still-active" and event.get("type") == "response")
+            assert live["data"]["goal"]["status"] == "active"
+            assert live["data"]["goal"]["id"] == goal["id"]
     finally:
         process.terminate()
         try:
@@ -221,13 +230,71 @@ def native_goal(root, server):
             process.wait()
 
 
+def scope_approval(root, server):
+    source, env, session = prepare(root, server)
+    Path(env["DL_ENGINEERING_POLICY"]).write_text("{}")
+    test = source / "tests/test_candidate.py"
+    test.parent.mkdir()
+    test.write_text("from pathlib import Path\nassert Path('candidate').read_text() == 'correct'\n")
+    launch = [PLUGIN / "omp/dl-omp", "--offline", "--resume", session, "--seconds", "24"]
+    command = ["omp", "--offline", "--no-judge", "--no-spotlight", "--resume", session, "-p"]
+
+    def run(steps, state, requests):
+        server.steps, server.context, server.calls = steps, [], 0
+        result = subprocess.run([*launch, "Implement the scoped engineering task."], cwd=source, env=env,
+                                text=True, capture_output=True, timeout=29)
+        verdict = json.loads(result.stdout)
+        assert verdict["state"] == state and server.calls == requests, (verdict, server.calls, result.stderr)
+        return verdict
+
+    def approve(approval, digest=None):
+        policy = root / "reviewed-checks.json"
+        policy.write_text(json.dumps(approval))
+        token = digest or sha256(policy.read_bytes()).hexdigest()
+        subprocess.run([*command, f"/deadlion approve-tests {token} {policy}"], cwd=source, env=env,
+                       capture_output=True, check=True, timeout=15)
+
+    run_shell = ("bash", {"command": "printf correct > candidate; printf '\n# Reviewed test revision\n' >> tests/test_candidate.py; python3 tests/test_candidate.py"})
+    waiting = run({0: run_shell}, "AWAITING_APPROVAL", 2)
+    assert waiting["report"]["status"] == "NOT VERIFIED"
+    assert waiting["report"]["failures"][0]["approval"]["kind"] == "functional-scope"
+    path = root / "state/deadlion" / waiting["task"] / "task.json"
+    original = json.loads(path.read_bytes())
+
+    continued = run({0: write("notes.md", "# Independent work\n")}, "AWAITING_APPROVAL", 2)
+    assert continued["task"] == waiting["task"] and (source / "notes.md").is_file()
+    check = {"name": "reviewed candidate suite", "type": "functional", "scope": ["candidate", "tests"],
+             "argv": ["python3", "-c", "import runpy; runpy.run_path('tests/test_candidate.py')"]}
+    approve({"checks": [check]}, digest="0" * 64)
+    assert not json.loads(path.read_bytes()).get("testApprovals")
+    approve({"checks": [check]})
+    pending = run({}, "AWAITING_APPROVAL", 1)
+    assert pending["report"]["failures"][0]["approval"]["kind"] == "test-revision"
+
+    revision = {"testRevision": {"tests/test_candidate.py": sha256(test.read_bytes()).hexdigest()}}
+    approve(revision)
+    final = run({}, "VERIFIED", 1)
+    assert final["task"] == waiting["task"]
+    saved = json.loads(path.read_bytes())
+    assert saved["baselineHash"] == original["baselineHash"] and saved["goal"] == original["goal"]
+    assert len(saved["testApprovals"]) == 2
+    test.write_text(test.read_text() + "# Subsequent unreviewed edit\n")
+    command_result = subprocess.run([*command, "/deadlion verify"], cwd=source, env=env,
+                                    text=True, capture_output=True, check=True, timeout=20)
+    gate_files = sorted(path.parent.glob("gate-*.json"), key=lambda file: file.stat().st_mtime_ns)
+    latest = json.loads(gate_files[-1].read_bytes())
+    assert any(row.get("approval", {}).get("kind") == "test-revision" for row in latest["checks"]), command_result
+    assert latest["status"] != "PASS"
+
+
 if __name__ == "__main__":
     with HTTPServer(("127.0.0.1", 0), Transport) as transport:
         threading.Thread(target=transport.serve_forever, daemon=True).start()
         for name, run in (("productive", productive), ("deferral", campaign),
                           ("replan", lambda root, server: campaign(root, server, True)),
                           ("dirty-checkpoint", lambda root, server: campaign(root, server, dirty=True)),
-                          ("budget", budget_resume), ("native-goal", native_goal)):
+                          ("budget", budget_resume), ("native-goal", native_goal), ("scope-approval", scope_approval),
+                          ("native-goal-awaiting-approval", lambda root, server: native_goal(root, server, True))):
             with tempfile.TemporaryDirectory(prefix="slopzero-") as temporary:
                 run(Path(temporary), transport)
                 print("PASSED", name)

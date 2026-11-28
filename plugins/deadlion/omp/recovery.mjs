@@ -87,3 +87,8 @@ export function recoveryMessage(task, record) {
   return `Deadlion ${task.last.status} · ${record.cause} · ${record.strategy}. ${record.reason.slice(0, 250)}. ` +
     guidance[record.strategy] + goal + (record.receipt ? " Receipt: " + record.receipt : "");
 }
+
+export function awaitsApproval(report) {
+  const failures = report.failures ?? [];
+  return failures.length > 0 && failures.every(failure => failure.approval);
+}

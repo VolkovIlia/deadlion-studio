@@ -14,7 +14,7 @@ import { verifyMilestone } from "./refactor.mjs";
 import { chargeAnalysis, operationTimeout, timeLeft } from "./execution.mjs";
 
 const semanticSource = p => supported(p) || /\.(h|hpp|tsx|jsx|mjs|cjs)$/.test(p);
-const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/.+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
+export const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/.+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
 
 function semanticStatus(item, required) {
   return !required && ["NOT VERIFIED", "INCONCLUSIVE"].includes(item.status) ? "WARNING" : item.status;
@@ -48,7 +48,7 @@ async function checkScope(task, baseline, current, paths, files, options, checks
     checks.push({ name: "accepted Evolution candidate", status: agrees ? "PASS" : "NOT VERIFIED",
       commit: task.experiment.commit });
   }
-  checkProtectedInputs(task, baseline, paths, checks);
+  checkProtectedInputs(task, baseline, current, paths, checks);
   // A test of the working tree cannot certify different bytes staged for commit.
   if (current.git && paths.length) await checkIndex(baseline, current, paths, checks, options);
   if (task.refactor || task.refactorFinal) return;
@@ -75,7 +75,7 @@ async function checkIndex(baseline, current, paths, checks, options) {
   if (mismatch.length) checks.push({ name: "index differs from tested files", status: "NOT VERIFIED", reason: mismatch.slice(0, 5).join(", ") });
 }
 
-function checkProtectedInputs(task, baseline, paths, checks) {
+function checkProtectedInputs(task, baseline, current, paths, checks) {
   const protectedPaths = [...task.policy.protectedPaths ?? [], ...task.policy.verificationInputs ?? []];
   const modifiedInputs = paths.filter(p => protectedPaths.some(name => contains(name, p)));
   if (modifiedInputs.length)
@@ -84,10 +84,12 @@ function checkProtectedInputs(task, baseline, paths, checks) {
   else if (protectedPaths.length)
     checks.push({ name: "protected verification inputs", status: "PASS",
       coverage: { type: "verification-input", paths: protectedPaths } });
-  const changedTests = paths.filter(p => testInput.test(p) && (baseline.files[p] || /(?:conftest\.py|pytest\.ini)$/.test(p)));
+  const changedTests = paths.filter(p => testInput.test(p) && (baseline.files[p] || /(?:conftest\.py|pytest\.ini)$/.test(p)) &&
+    (!task.approvedTestRevisions?.[p] || JSON.stringify(task.approvedTestRevisions[p]) !== JSON.stringify(current.files[p]?.[1])));
   if ((task.policy.tests || task.policy.checks?.some(c => c.type === "functional")) &&
       changedTests.length && paths.some(p => !documentation(p) && !testInput.test(p)))
-    checks.push({ name: "existing tests changed with production code", status: "BLOCKED",
+    checks.push({ name: "existing tests changed with production code", status: "NOT VERIFIED",
+      approval: { kind: "test-revision", paths: changedTests },
       reason: "Approve the test revision independently before using it: " + changedTests.slice(0, 5).join(", ") });
   if (paths.some(p => basename(p) === ".budget" || /^\.performance\/.*\/contract\.json$/.test(p) && baseline.files[p]))
     checks.push({ name: "approved policy changed", status: "BLOCKED" });
@@ -229,7 +231,7 @@ async function reviewChanges(task, { baseline, current, paths, area, source, che
   const files = await regular(task.root, paths);
   const sources = files.filter(supported);
   await checkScope(task, baseline, current, paths, files, options, checks, run);
-  if (checks.some(check => check.status === "BLOCKED")) return;
+  if (checks.some(check => check.status === "BLOCKED" || check.approval?.kind === "test-revision")) return;
   await checkSemantics(task, files, source, checks, options, probe);
   await checkAnalyzers(task, sources, options, checks);
   if (sources.length && (task.policy.semgrepConfig || task.policy.requiredAnalyzers?.includes("semgrep"))) {
@@ -256,13 +258,21 @@ async function checkRequirements(task, paths, area, checks, run) {
   await approvedCommands(task, checks, run, area);
   const performance = await checkContracts(task, paths, checks, run);
   if (task.designIssue) checks.push({ name: "design", status: "BLOCKED", reason: task.designIssue });
-  const missing = coverageFor(area, checks).filter(row => row.status === "NOT VERIFIED");
-  if (missing.length)
-    checks.push({ name: "functional verification", status: "NOT VERIFIED", missing,
-      reason: "Approve or run a scoped functional check for " +
-        missing.slice(0, 5).map(row => row.interface ? row.path + " [" + row.affectedComponents.join(", ") + "]" : row.path).join(", ") });
+  const gap = functionalGap(area, checks);
+  if (gap) checks.push(gap);
   if (task.mode !== "Standard" && performance === "NOT APPLICABLE")
     checks.push({ name: "approved experimental contract", status: "NOT VERIFIED" });
+}
+
+function functionalGap(area, checks) {
+  const missing = coverageFor(area, checks).filter(row => row.status === "NOT VERIFIED");
+  if (!missing.length) return;
+  const declared = coverageFor(missing, checks.map(check => ({ ...check, status: "PASS" })));
+  const unapproved = declared.filter(row => row.status === "NOT VERIFIED");
+  return { name: "functional verification", status: "NOT VERIFIED", missing,
+    approval: unapproved.length === missing.length ? { kind: "functional-scope", paths: unapproved.map(row => row.path) } : undefined,
+    reason: "Approve or run a scoped functional check for " +
+      missing.slice(0, 5).map(row => row.interface ? row.path + " [" + row.affectedComponents.join(", ") + "]" : row.path).join(", ") };
 }
 
 async function approvedCommands(task, checks, run, area) {
@@ -366,7 +376,8 @@ async function receiptFor(task, checks, area, source, workspaceHash, started) {
   const scaling = checks.flatMap(c => (c.data?.contracts ?? [c.data]).map(scalingSummary).filter(Boolean)).slice(0, 2);
   return { receipt, receiptHash: digest(JSON.stringify(evidence)), status, paths, source, scaling,
     confirmed: checks.filter(c => c.status === "PASS").map(c => c.name), deficits: checkDeficits(failures),
-    failures: failures.map(c => ({ name:c.name, status:c.status, reason:String(c.reason ?? c.output ?? c.data?.reason ?? "").slice(0, 360) })) };
+    failures: failures.map(c => ({ name:c.name, status:c.status, approval:c.approval,
+      reason:String(c.reason ?? c.output ?? c.data?.reason ?? "").slice(0, 360) })) };
 }
 
 function checkDeficits(failures) {

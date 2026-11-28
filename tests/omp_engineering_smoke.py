@@ -133,7 +133,7 @@ def contract_scenarios(source, env, server, policy):
     assert any(c["name"] == "approved contracts" and c["status"] != "PASS" for c in report["checks"]), report
     (source / "candidate").write_text("good\n")
     report = trial(source, env, server, {0: ("write", {"path": "unrelated.py", "content": "value = 1\n"})},
-                   "BLOCKED", 2)
+                   "AWAITING_APPROVAL", 2)
     assert any(c["name"] == "approved contracts" and c["status"] == "PASS" for c in report["checks"])
     assert [(c["path"], c["status"]) for c in report["coverage"]] == [("unrelated.py", "NOT VERIFIED")]
     (source / "candidate").write_text("previous\n")
@@ -281,7 +281,7 @@ def python_hover(source, env, server, policy):
 def required_and_simple(source, env, server, policy):
     policy.write_text(json.dumps({"maxCorrections": 0}))
     report = trial(source, env, server, {0: ("bash", {"command": "echo 'enabled = True' > new_module.py"})},
-                   "BLOCKED", 2)
+                   "AWAITING_APPROVAL", 2)
     assert any(c["name"] == "functional verification" and c["status"] == "NOT VERIFIED" for c in report["checks"]), report["checks"]
     trace = map(json.loads, reversed(Path(env["DL_TEST_TRACE"]).read_text().splitlines()))
     session = next(row[3] for row in trace if row[:2] == ["before_agent_start", "main"])
@@ -289,7 +289,7 @@ def required_and_simple(source, env, server, policy):
     resumed = subprocess.run([PLUGIN / "omp/dl-omp", "--offline", "--resume", session, "--seconds", "20", "Finish."],
                              cwd=source, env=env, capture_output=True, text=True, timeout=25)
     verdict = json.loads(resumed.stdout)
-    assert resumed.returncode == 2 and verdict["task"] == report["task"] and verdict["state"] == "BLOCKED"
+    assert resumed.returncode == 2 and verdict["task"] == report["task"] and verdict["state"] == "AWAITING_APPROVAL"
     assert "new_module.py" in verdict["report"]["paths"] and server.calls == 1
     report = trial(source, env, server, {}, "VERIFIED", 1, prompt="Summarize this project.")
     assert report["checks"] == [] and report["paths"] == []
@@ -298,7 +298,7 @@ def required_and_simple(source, env, server, policy):
     assert report["route"]["scope"] == "read-only" and report["route"]["mode"] == "Standard"
     policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "maxCorrections": 0}))
     report = trial(source, env, server, {0: ("write", {"path": "unexpected.py", "content": "answer = 42\n"})},
-                   "BLOCKED", 2, prompt="Explain the algorithm without changing files.")
+                   "AWAITING_APPROVAL", 2, prompt="Explain the algorithm without changing files.")
     assert report["route"]["scope"] == "one file"
     assert any(c["name"] == "functional tests" and c["status"] == "PASS" for c in report["checks"])
     assert not any(c["status"] == "VERIFIED" for c in report["coverage"])
