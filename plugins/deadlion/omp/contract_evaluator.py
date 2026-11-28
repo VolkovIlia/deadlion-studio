@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 import socketserver
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -98,7 +99,7 @@ def evaluator(directory, limits, unit=None):
         with tempfile.NamedTemporaryFile(
             dir=directory, prefix=f"evidence-{ordinal}-", suffix=".json", delete=False
         ) as output:
-            command = [gate, contract, "--candidate-dir", repo, "--isolated"]
+            command = [sys.executable, gate, contract, "--candidate-dir", repo, "--isolated"]
             if unit:
                 remaining = max(0.01, limits["deadline"] / 1000 - time.time())
                 command = [
@@ -109,6 +110,7 @@ def evaluator(directory, limits, unit=None):
                     "--pipe",
                     "--quiet",
                     "--slice=" + unit,
+                    "--setenv=PATH=" + str(Path(sys.executable).parent) + ":/usr/local/bin:/usr/bin:/bin",
                     "--setenv=DL_EVALUATOR_SLICE=" + unit,
                     "--setenv=DL_EVALUATOR_DEADLINE=" + str(limits["deadline"] / 1000),
                     "-p",
@@ -126,9 +128,13 @@ def evaluator(directory, limits, unit=None):
                 stderr=subprocess.DEVNULL,
                 timeout=max(0.01, limits["deadline"] / 1000 - time.time()),
             )
+        try:
+            report = json.loads(Path(output.name).read_bytes())
+        except ValueError as error:
+            raise ValueError(f"approved contract produced no report (exit {trial.returncode})") from error
         if trial.returncode:
-            raise ValueError("approved contract rejected the candidate")
-        report = json.loads(Path(output.name).read_bytes())
+            reason = str(report.get("reason", report.get("status", "no status")))
+            raise ValueError("approved contract rejected the candidate: " + reason[:400])
         if report["status"] != "VERIFIED":
             raise ValueError("missing verification")
         return report
