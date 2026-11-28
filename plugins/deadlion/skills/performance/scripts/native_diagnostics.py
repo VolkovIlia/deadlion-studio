@@ -1,41 +1,63 @@
 """Review diagnostics from installed project-native tools. Run only on trusted projects."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 
 
-def review(files, coverage):
+def project_for(file):
+    specs = {
+        ".rs": (("Cargo.toml",), "cargo"),
+        ".go": (("go.mod",), "staticcheck"),
+        ".java": (("pom.xml", "build.gradle", "build.gradle.kts"), "pmd"),
+        ".kt": (("detekt.yml", "config/detekt/detekt.yml"), "detekt"),
+    }
+    for suffix in (".c", ".cc", ".cpp", ".cxx"):
+        specs[suffix] = (("compile_commands.json",), "clang-tidy")
+    for suffix in (".ts", ".js"):
+        specs[suffix] = (
+            ("eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"),
+            "eslint",
+        )
+    if file.suffix not in specs:
+        return None, None
+    markers, tool = specs[file.suffix]
+    hit = next(
+        (
+            (p, m)
+            for p in file.resolve().parents
+            for m in markers
+            if (p / m).is_file()
+        ),
+        None,
+    )
+    if tool == "clang-tidy":
+        hit = compilation_database(file.resolve())
+    return tool, hit
+
+
+def compilation_database(file):
+    explicit = os.environ.get("DL_COMPILE_COMMANDS")
+    candidates = [Path(explicit).resolve()] if explicit else (
+        root / build / "compile_commands.json" for root in file.parents for build in ("", "build")
+    )
+    for db in candidates:
+        if db.is_file() and any(
+            (Path(row["directory"]) / row["file"]).resolve() == file for row in json.loads(db.read_bytes())
+        ):
+            return db.parent, db.name
+
+
+def jobs_for(files, coverage):
     jobs = set()
     for file in files:
-        specs = {
-            ".rs": (("Cargo.toml",), "cargo"),
-            ".go": (("go.mod",), "staticcheck"),
-            ".java": (("pom.xml", "build.gradle", "build.gradle.kts"), "pmd"),
-            ".kt": (("detekt.yml", "config/detekt/detekt.yml"), "detekt"),
-        }
-        for suffix in (".c", ".cc", ".cpp", ".cxx"):
-            specs[suffix] = (("compile_commands.json",), "clang-tidy")
-        for suffix in (".ts", ".js"):
-            specs[suffix] = (
-                ("eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"),
-                "eslint",
-            )
-        if file.suffix not in specs:
+        tool, hit = project_for(file)
+        if tool is None:
             continue
-        markers, tool = specs[file.suffix]
-        hit = next(
-            (
-                (p, m)
-                for p in file.resolve().parents
-                for m in markers
-                if (p / m).is_file()
-            ),
-            None,
-        )
         if not hit:
-            coverage[tool] = coverage.get(tool, "no matching project configuration")
+            coverage[tool] = "no matching project configuration"
             continue
         root, marker = hit
         local = root / "node_modules/.bin/eslint"
@@ -45,7 +67,7 @@ def review(files, coverage):
         if not binary:
             coverage[tool] = "not installed"
             continue
-        coverage[tool] = "selected"
+        coverage.setdefault(tool, "selected")
         jobs.add(
             (
                 tool,
@@ -55,7 +77,11 @@ def review(files, coverage):
                 str(file.resolve()) if tool not in ("staticcheck", "cargo") else "",
             )
         )
-    for tool, binary, root, marker, file in sorted(jobs):
+    return jobs
+
+
+def review(files, coverage):
+    for tool, binary, root, marker, file in sorted(jobs_for(files, coverage)):
         if tool in ("eslint", "pmd", "detekt"):
             yield from project_findings(tool, binary, root, marker, file)
             continue
@@ -86,32 +112,41 @@ def review(files, coverage):
             ):
                 yield diagnostic(path, int(line), rule, message)
             continue
-        count = 0
-        for line in r.stdout.splitlines():
-            item = json.loads(line)
-            if tool == "cargo":
-                if item.get("reason") != "compiler-message":
-                    continue
-                msg = item["message"]
-                rule = (msg.get("code") or {}).get("code", "")
-                if not rule.startswith("clippy::"):
-                    continue
-                span = next((s for s in msg["spans"] if s["is_primary"]), None)
-                if span:
-                    yield diagnostic(
-                        str(root / span["file_name"]),
-                        span["line_start"],
-                        rule,
-                        msg["message"],
-                    )
-            else:
-                pos = item["location"]
-                count += 1
+        yield from build_messages(tool, root, r)
+
+
+def build_messages(tool, root, r):
+    count = 0
+    if tool == "cargo":
+        manifest = subprocess.check_output(
+            ["cargo", "locate-project", "--workspace", "--message-format", "plain"], cwd=root, text=True, timeout=5
+        )
+        root = Path(manifest.rstrip("\n")).parent
+    for line in r.stdout.splitlines():
+        item = json.loads(line)
+        if tool == "cargo":
+            if item.get("reason") != "compiler-message":
+                continue
+            msg = item["message"]
+            rule = (msg.get("code") or {}).get("code", "")
+            if not rule.startswith("clippy::"):
+                continue
+            span = next((s for s in msg["spans"] if s["is_primary"]), None)
+            if span:
                 yield diagnostic(
-                    pos["file"], pos["line"], item["code"], item["message"]
+                    str(root / span["file_name"]),
+                    span["line_start"],
+                    rule,
+                    msg["message"],
                 )
-        if tool == "staticcheck" and r.returncode and not count:
-            raise ValueError("staticcheck produced no diagnostics on failure")
+        else:
+            pos = item["location"]
+            count += 1
+            yield diagnostic(
+                pos["file"], pos["line"], item["code"], item["message"]
+            )
+    if tool == "staticcheck" and r.returncode and not count:
+        raise ValueError("staticcheck produced no diagnostics on failure")
 
 
 def project_findings(tool, binary, root, marker, file):
@@ -152,32 +187,36 @@ def project_findings(tool, binary, root, marker, file):
         if result.returncode not in codes:
             raise ValueError(f"{tool} failed: {(result.stderr or result.stdout)[-400:]}")
         payload = json.loads(report.read_bytes() if tool == "detekt" else result.stdout)
-        if tool == "pmd":
-            if any(payload.get(k) for k in ("processingErrors", "configurationErrors")):
-                raise ValueError("PMD reported an analysis error")
-            for item in payload["files"]:
-                for d in item["violations"]:
+        yield from parse_project(tool, file, payload)
+
+
+def parse_project(tool, file, payload):
+    if tool == "pmd":
+        if any(payload.get(k) for k in ("processingErrors", "configurationErrors")):
+            raise ValueError("PMD reported an analysis error")
+        for item in payload["files"]:
+            for d in item["violations"]:
+                yield diagnostic(
+                    item["filename"], d["beginline"], d["rule"], d["description"]
+                )
+    elif tool == "detekt":
+        for run in payload["runs"]:
+            for d in run["results"]:
+                if ".performance." not in d["ruleId"]:
+                    continue
+                region = d["locations"][0]["physicalLocation"]["region"]
+                yield diagnostic(
+                    file, region["startLine"], d["ruleId"], d["message"]["text"]
+                )
+    else:
+        for item in payload:
+            for d in item["messages"]:
+                if d.get("fatal"):
+                    raise ValueError(d["message"])
+                if d.get("ruleId"):
                     yield diagnostic(
-                        item["filename"], d["beginline"], d["rule"], d["description"]
+                        item["filePath"], d["line"], d["ruleId"], d["message"]
                     )
-        elif tool == "detekt":
-            for run in payload["runs"]:
-                for d in run["results"]:
-                    if ".performance." not in d["ruleId"]:
-                        continue
-                    region = d["locations"][0]["physicalLocation"]["region"]
-                    yield diagnostic(
-                        file, region["startLine"], d["ruleId"], d["message"]["text"]
-                    )
-        else:
-            for item in payload:
-                for d in item["messages"]:
-                    if d.get("fatal"):
-                        raise ValueError(d["message"])
-                    if d.get("ruleId"):
-                        yield diagnostic(
-                            item["filePath"], d["line"], d["ruleId"], d["message"]
-                        )
 
 
 def diagnostic(path, line, rule, message):

@@ -1,0 +1,265 @@
+{
+  "omp": "omp/19.2.1",
+  "kernel": "7.2.11-200.fc44.x86_64",
+  "timing": "One warm end-to-end Core invocation per fixture. Other processes were running. Paths in diagnostics are relative to each fixture.",
+  "gradle": {
+    "build": "plugins { id 'java'; id 'org.jetbrains.kotlin.jvm' version '2.2.10' }\nrepositories { mavenCentral() }\njava { sourceCompatibility = JavaVersion.VERSION_24; targetCompatibility = JavaVersion.VERSION_24 }\njava { toolchain { languageVersion = JavaLanguageVersion.of(25) } }",
+    "result": "BUILD SUCCESSFUL in 6s",
+    "tasks": [
+      "compileKotlin",
+      "compileJava",
+      "classes"
+    ],
+    "sources": {
+      "src/main/java/Count.java": "class Count {String f(String[] xs){String s=\"\"; for(String x:xs){s+=x;}return s;}}",
+      "src/main/kotlin/Probe.kt": "fun run() { (1..100).forEach { println(it) } }"
+    }
+  },
+  "probes": [
+    {
+      "fixture": "Gradle Java and Kotlin",
+      "inputs": [
+        "src/main/java/Count.java",
+        "src/main/kotlin/Probe.kt"
+      ],
+      "argv": [
+        "dl-analyze",
+        "--native",
+        "--json",
+        "src/main/java/Count.java",
+        "src/main/kotlin/Probe.kt"
+      ],
+      "elapsed_ms": 1890.0,
+      "exit": 0,
+      "report": {
+        "status": "CHECKED",
+        "scope": "Ruff PERF and Deadlion AST rules",
+        "files": 2,
+        "diagnostics": [
+          {
+            "file": "src/main/kotlin/Probe.kt",
+            "line": 1,
+            "rule": "detekt.performance.ForEachOnRange",
+            "explanation": "Using the forEach method on ranges has a heavy performance cost. Prefer using simple for loops.",
+            "confidence": "native diagnostic",
+            "severity": "INFO",
+            "confirm": "Check semantics and compare the affected workload with dl-perf scale.",
+            "provenance": [
+              {
+                "source": "native",
+                "rule": "detekt.performance.ForEachOnRange",
+                "explanation": "Using the forEach method on ranges has a heavy performance cost. Prefer using simple for loops."
+              }
+            ],
+            "category": "performance",
+            "evidenceLevel": "HEURISTIC"
+          },
+          {
+            "file": "src/main/java/Count.java",
+            "line": 1,
+            "rule": "UseStringBufferForStringAppends",
+            "explanation": "Prefer StringBuilder (non-synchronized) or StringBuffer (synchronized) over += for concatenating strings",
+            "confidence": "native diagnostic",
+            "severity": "INFO",
+            "confirm": "Check semantics and compare the affected workload with dl-perf scale.",
+            "provenance": [
+              {
+                "source": "native",
+                "rule": "UseStringBufferForStringAppends",
+                "explanation": "Prefer StringBuilder (non-synchronized) or StringBuffer (synchronized) over += for concatenating strings"
+              }
+            ],
+            "category": "performance",
+            "evidenceLevel": "HEURISTIC"
+          }
+        ],
+        "checked_tools": [
+          "ast-grep"
+        ],
+        "native_tools": {
+          "pmd": "selected",
+          "detekt": "selected"
+        }
+      }
+    },
+    {
+      "fixture": "Go module",
+      "inputs": [
+        "probe.go"
+      ],
+      "argv": [
+        "dl-analyze",
+        "--native",
+        "--json",
+        "probe.go"
+      ],
+      "elapsed_ms": 259.4,
+      "exit": 0,
+      "report": {
+        "status": "CHECKED",
+        "scope": "Ruff PERF and Deadlion AST rules",
+        "files": 1,
+        "diagnostics": [
+          {
+            "file": "probe.go",
+            "line": 3,
+            "rule": "SA6000",
+            "explanation": "calling regexp.MatchString in a loop has poor performance, consider using regexp.Compile",
+            "confidence": "native diagnostic",
+            "severity": "INFO",
+            "confirm": "Check semantics and compare the affected workload with dl-perf scale.",
+            "provenance": [
+              {
+                "source": "native",
+                "rule": "SA6000",
+                "explanation": "calling regexp.MatchString in a loop has poor performance, consider using regexp.Compile"
+              }
+            ],
+            "category": "performance",
+            "evidenceLevel": "HEURISTIC"
+          }
+        ],
+        "checked_tools": [
+          "ast-grep"
+        ],
+        "native_tools": {
+          "staticcheck": "selected"
+        }
+      }
+    },
+    {
+      "fixture": "TypeScript project",
+      "inputs": [
+        "probe.ts"
+      ],
+      "argv": [
+        "dl-analyze",
+        "--native",
+        "--json",
+        "probe.ts"
+      ],
+      "elapsed_ms": 665.3,
+      "exit": 0,
+      "report": {
+        "status": "CHECKED",
+        "scope": "Ruff PERF and Deadlion AST rules",
+        "files": 1,
+        "diagnostics": [
+          {
+            "file": "probe.ts",
+            "line": 1,
+            "rule": "@typescript-eslint/await-thenable",
+            "explanation": "Unexpected `await` of a non-Promise (non-\"Thenable\") value.",
+            "confidence": "native diagnostic",
+            "severity": "INFO",
+            "confirm": "Check semantics and compare the affected workload with dl-perf scale.",
+            "provenance": [
+              {
+                "source": "native",
+                "rule": "@typescript-eslint/await-thenable",
+                "explanation": "Unexpected `await` of a non-Promise (non-\"Thenable\") value."
+              }
+            ],
+            "category": "performance",
+            "evidenceLevel": "HEURISTIC"
+          }
+        ],
+        "checked_tools": [
+          "ast-grep"
+        ],
+        "native_tools": {
+          "eslint": "selected"
+        }
+      }
+    },
+    {
+      "fixture": "Cargo workspace member",
+      "inputs": [
+        "member/src/lib.rs"
+      ],
+      "argv": [
+        "dl-analyze",
+        "--native",
+        "--json",
+        "member/src/lib.rs"
+      ],
+      "elapsed_ms": 103.8,
+      "exit": 0,
+      "report": {
+        "status": "CHECKED",
+        "scope": "Ruff PERF and Deadlion AST rules",
+        "files": 1,
+        "diagnostics": [
+          {
+            "file": "member/src/lib.rs",
+            "line": 1,
+            "rule": "clippy::iter_cloned_collect",
+            "explanation": "called `iter().cloned().collect()` on a slice to create a `Vec`. Calling `to_vec()` is both faster and more readable",
+            "confidence": "native diagnostic",
+            "severity": "INFO",
+            "confirm": "Check semantics and compare the affected workload with dl-perf scale.",
+            "provenance": [
+              {
+                "source": "native",
+                "rule": "clippy::iter_cloned_collect",
+                "explanation": "called `iter().cloned().collect()` on a slice to create a `Vec`. Calling `to_vec()` is both faster and more readable"
+              }
+            ],
+            "category": "performance",
+            "evidenceLevel": "HEURISTIC"
+          }
+        ],
+        "checked_tools": [
+          "ast-grep"
+        ],
+        "native_tools": {
+          "cargo": "selected"
+        }
+      }
+    },
+    {
+      "fixture": "Infer Java probe on current PATH",
+      "inputs": [
+        "Count.java"
+      ],
+      "argv": [
+        "dl-analyze",
+        "--infer-cost",
+        "--json",
+        "Count.java"
+      ],
+      "elapsed_ms": 50.2,
+      "exit": 2,
+      "report": {
+        "status": "NOT VERIFIED",
+        "reason": "[Errno 2] No such file or directory: 'infer'"
+      }
+    },
+    {
+      "fixture": "Nonstandard Clang compilation database",
+      "inputs": [
+        "check.c"
+      ],
+      "argv": [
+        "dl-analyze",
+        "--native",
+        "--json",
+        "check.c"
+      ],
+      "elapsed_ms": 312.1,
+      "exit": 0,
+      "report": {
+        "status": "CHECKED",
+        "scope": "Ruff PERF and Deadlion AST rules",
+        "files": 1,
+        "diagnostics": [],
+        "checked_tools": [
+          "ast-grep"
+        ],
+        "native_tools": {
+          "clang-tidy": "selected"
+        }
+      }
+    }
+  ]
+}

@@ -20,6 +20,33 @@ def check():
     if where.returncode:
         return {"status": "NOT APPLICABLE"}
     root = Path(os.fsdecode(where.stdout).rstrip("\n"))
+    revision = approved_revision(root)
+    if revision is None:
+        return {"status": "NOT APPLICABLE"}
+    approved = sorted(
+        p
+        for p in files(
+            git(
+                "ls-tree",
+                "-rz",
+                "--name-only",
+                revision,
+                "--",
+                ".performance",
+                cwd=root,
+            )
+        )
+        if Path(p).name == "contract.json"
+    )
+    if not approved:
+        return {"status": "NOT APPLICABLE"}
+    selected = selected_contracts(root, revision, approved, changed_paths(root, revision))
+    if not selected:
+        return {"status": "NOT APPLICABLE"}
+    return evaluate(root, revision, selected)
+
+
+def approved_revision(root):
     resolved = subprocess.run(
         [
             "git",
@@ -41,30 +68,22 @@ def check():
                 check=True,
             ).stdout
         ):
-            return {"status": "NOT APPLICABLE"}
+            return None
         raise ValueError("approved base revision unavailable")
-    revision = resolved.stdout.decode().strip()
-    approved = sorted(
-        p
-        for p in files(
-            git(
-                "ls-tree",
-                "-rz",
-                "--name-only",
-                revision,
-                "--",
-                ".performance",
-                cwd=root,
-            )
-        )
-        if Path(p).name == "contract.json"
-    )
-    if not approved:
-        return {"status": "NOT APPLICABLE"}
+    return resolved.stdout.decode().strip()
+
+
+def changed_paths(root, revision):
     changed = files(
         git("diff", "--no-renames", "--name-only", "-z", revision, "--", cwd=root)
     )
     changed |= files(git("ls-files", "--others", "--exclude-standard", "-z", cwd=root))
+    changed |= files(git("diff", "--cached", "--no-renames", "--name-only", "-z", revision, "--", cwd=root))
+    return changed
+
+
+def selected_contracts(root, revision, approved, changed):
+    project_scope = os.environ.get("DL_PERF_PROJECT_SCOPE") == "1"
     selected = []
     for path in approved:
         c = json.loads(git("show", revision + ":" + path, cwd=root))
@@ -85,14 +104,16 @@ def check():
             ]
         if s := c.get("scaling"):
             names = [*names, *s["implementations"][c["choice"]]["files"]]
-        if any(Path(f).is_relative_to(directory) for f in changed) or changed & {
+        if project_scope or any(Path(f).is_relative_to(directory) for f in changed) or changed & {
             str(impl / f) for f in names
         }:
             if not (root / path).is_file():
                 raise ValueError(f"approved contract removed: {path}")
             selected.append((path, root / impl))
-    if not selected:
-        return {"status": "NOT APPLICABLE"}
+    return selected
+
+
+def evaluate(root, revision, selected):
     reports = []
     with tempfile.TemporaryDirectory() as tmp:
         with tempfile.TemporaryFile() as archive:

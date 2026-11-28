@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Run one engineering task through installed OMP RPC and require its final verdict."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import queue
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+
+def feed(stream, events):
+    try:
+        for line in stream:
+            try:
+                events.put(json.loads(line))
+            except ValueError:
+                continue
+    finally:
+        events.put(None)
+
+
+def validated(verdict):
+    if verdict.get("state") != "VERIFIED":
+        return verdict
+    try:
+        report = verdict["report"]
+        content = Path(report["receipt"]).read_bytes()
+        if hashlib.sha256(content).hexdigest() != report["receiptHash"]:
+            raise ValueError("receipt digest mismatch")
+        evidence = json.loads(content)
+        if evidence["task"] != verdict["task"] or evidence["status"] != "PASS" or evidence["source"] != report["source"]:
+            raise ValueError("receipt scope or verdict mismatch")
+    except (KeyError, OSError, ValueError, TypeError) as error:
+        return {"state": "INCOMPLETE", "reason": str(error)}
+    return verdict
+
+
+def supervise(process, path, prompt, deadline):
+    events = queue.Queue()
+    threading.Thread(target=feed, args=(process.stdout, events), daemon=True).start()
+    complete = settled = False
+    while time.monotonic() < deadline:
+        if complete and settled and path.exists():
+            return json.loads(path.read_bytes())
+        try:
+            event = events.get(timeout=min(0.25, max(0.01, deadline - time.monotonic())))
+        except queue.Empty:
+            continue
+        if event is None:
+            return {"state": "INCOMPLETE", "reason": "OMP exited before prompt completion"}
+        if event.get("type") == "session_settled":
+            settled = True
+        if event.get("type") == "ready":
+            process.stdin.write('{"id":"capabilities","type":"get_available_commands"}\n')
+            process.stdin.flush()
+        if event.get("type") == "response" and event.get("id") == "capabilities":
+            commands = event.get("data", {}).get("commands", [])
+            if sum(c["name"].lstrip("/") == "deadlion" for c in commands) != 1:
+                return {"state": "INCOMPLETE", "reason": "Deadlion command missing or duplicated"}
+            settled = False
+            process.stdin.write(json.dumps(dict(type="prompt", id="deadlion", message=prompt)) + "\n")
+            process.stdin.flush()
+        if event.get("type") == "response" and event.get("id") == "deadlion":
+            if not event.get("success") or event.get("data", {}).get("agentInvoked") is False:
+                return {"state": "INCOMPLETE", "reason": event.get("error") or "command did not start an engineering task"}
+        if event.get("type") == "prompt_result" and event.get("id") == "deadlion":
+            if event.get("status") != "completed":
+                if path.exists():
+                    verdict = json.loads(path.read_bytes())
+                    if verdict["state"] != "VERIFIED":
+                        return verdict
+                return {"state": "CANCELLED" if event.get("status") == "aborted" else "INCOMPLETE", "reason": "OMP prompt " + str(event.get("status"))}
+            complete = True
+            settled = bool(event.get("sessionSettled"))
+        if complete and settled and not path.exists():
+            return {"state": "INCOMPLETE", "reason": "OMP settled without a Deadlion verdict"}
+    return {"state": "INCOMPLETE", "reason": "supervisor deadline reached"}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("prompt")
+    parser.add_argument("--seconds", type=int, default=900)
+    parser.add_argument("--resume", help="OMP session id or path for unfinished work")
+    parser.add_argument("--offline", action="store_true")
+    args = parser.parse_args()
+    with tempfile.TemporaryDirectory(prefix="deadlion-rpc-") as tmp:
+        path = Path(tmp) / "verdict.json"
+        cmd = ["omp", "--mode", "rpc", "--no-judge", "--no-spotlight"]
+        if args.resume:
+            cmd.extend(["--resume", args.resume])
+        if args.offline:
+            cmd.append("--offline")
+        proc = subprocess.Popen(cmd, env={**os.environ, "DL_VERDICT_FILE": str(path)},
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            verdict = validated(supervise(proc, path, args.prompt, time.monotonic() + args.seconds))
+        except KeyboardInterrupt:
+            verdict = {"state": "CANCELLED"}
+        finally:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGTERM)
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait()
+        print(json.dumps(verdict))
+        return 0 if verdict["state"] == "VERIFIED" else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

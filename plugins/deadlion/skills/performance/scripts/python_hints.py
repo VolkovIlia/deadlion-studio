@@ -39,9 +39,14 @@ def hints(path, source):
             message = "Check whether the sort input or key changes between iterations."
         else:
             continue
+        target = fn.value if isinstance(fn, ast.Attribute) else node.args[0]
         yield dict(
+            semanticTarget={"line": target.lineno, "symbol": target.id} if isinstance(target, ast.Name) else None,
             file=str(path),
             line=node.lineno,
+            source="python_hints",
+            range=dict(startLine=node.lineno, startColumn=node.col_offset + 1,
+                       endLine=node.end_lineno, endColumn=node.end_col_offset + 1, unit="UTF-8 byte"),
             rule=rule,
             severity="INFO",
             confidence="heuristic",

@@ -1,4 +1,5 @@
 """Run OMP's real autoresearch lifecycle against a local scripted transport."""
+import hashlib
 import json
 import os
 import re
@@ -95,6 +96,32 @@ echo '{"status":"VERIFIED","interval":[1,1]}'
     return profile, repo
 
 
+def contract_arguments(directory):
+    verifier_args = []
+    record=json.loads((ROOT/"plugins/deadlion/evals/indexed-membership/contract.json").read_bytes())
+    record["benchmark"] = dict(baseline=["sh","-c","sleep .03; echo good"],
+                               candidate=["cat","candidate"],expected="expected")
+    record["budget"] = {"max_wall_ratio":1}
+    for name,flag in (("train","--contract"),("holdout","--holdout-contract")):
+        trusted=directory/name
+        trusted.mkdir()
+        (trusted/"input").write_text(name)
+        (trusted/"expected").write_text("good\n")
+        (trusted/"generate.py").write_text(
+            "import json,sys\nr=json.load(sys.stdin)\n"
+            + f"print(json.dumps(dict(input={name!r}+str(r),expected='good\\n')))\n")
+        record["scaling"] = dict(dimensions={"n":[2,4,8,16,32,64]},distributions=["fixed"],
+            generator=["python3","generate.py"],implementations={
+                "scan":{"argv":record["benchmark"]["baseline"],"files":[]},
+                "index":{"argv":record["benchmark"]["candidate"],"files":["candidate"]}},
+            model_tolerance=.2,models=["constant","linear"],min_repetitions=9,
+            requirements=[dict(implementation="index",metric="peak_rss_kib",max=65536)],
+            limits=dict(seconds=25,memory_mib=96,max_points=6))
+        (trusted/"contract.json").write_text(json.dumps(record))
+        verifier_args.extend([flag,trusted/"contract.json"])
+    return verifier_args
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp, HTTPServer(("127.0.0.1", 0), Transport) as server:
         directory = Path(tmp)
@@ -106,30 +133,7 @@ def main():
         env = {**os.environ, "PI_CODING_AGENT_DIR": str(profile), "FIXTURE_API_KEY": "unused",
                "GIT_AUTHOR_NAME": "Smoke", "GIT_COMMITTER_NAME": "Smoke",
                "GIT_AUTHOR_EMAIL": "smoke@example.invalid", "GIT_COMMITTER_EMAIL": "smoke@example.invalid"}
-        verifier_args = ["--check",source/"check"]
-        if server.contracts:
-            verifier_args = []
-            record=json.loads((ROOT/"plugins/deadlion/evals/indexed-membership/contract.json").read_bytes())
-            record["benchmark"] = dict(baseline=["sh","-c","sleep .03; echo good"],
-                                       candidate=["cat","candidate"],expected="expected")
-            record["budget"] = {"max_wall_ratio":1}
-            for name,flag in (("train","--contract"),("holdout","--holdout-contract")):
-                trusted=directory/name
-                trusted.mkdir()
-                (trusted/"input").write_text(name)
-                (trusted/"expected").write_text("good\n")
-                (trusted/"generate.py").write_text(
-                    "import json,sys\nr=json.load(sys.stdin)\n"
-                    + f"print(json.dumps(dict(input={name!r}+str(r),expected='good\\n')))\n")
-                record["scaling"] = dict(dimensions={"n":[2,4,8,16,32,64]},distributions=["fixed"],
-                    generator=["python3","generate.py"],implementations={
-                        "scan":{"argv":record["benchmark"]["baseline"],"files":[]},
-                        "index":{"argv":record["benchmark"]["candidate"],"files":["candidate"]}},
-                    model_tolerance=.2,models=["constant","linear"],min_repetitions=9,
-                    requirements=[dict(implementation="index",metric="peak_rss_kib",max=65536)],
-                    limits=dict(seconds=25,memory_mib=96,max_points=6))
-                (trusted/"contract.json").write_text(json.dumps(record))
-                verifier_args.extend([flag,trusted/"contract.json"])
+        verifier_args = contract_arguments(directory) if server.contracts else ["--check", source / "check"]
         run = subprocess.run([ROOT / "plugins/deadlion/omp/dl-evolve", workspace,
                               "--goal", "Smoke test", "--iterations", "2", "--seconds", "55",
                               *verifier_args, "--pause-after", "1"], cwd=source, capture_output=True,
@@ -155,6 +159,11 @@ def main():
         with sqlite3.connect(databases[0]) as db:
             statuses = db.execute("SELECT status FROM runs ORDER BY id").fetchall()
         assert statuses == [("keep",), ("discard",)], statuses
+        accepted = json.loads(subprocess.check_output([
+            sys.executable, ROOT / "plugins/deadlion/omp/experiment-result.py", workspace
+        ]))
+        assert accepted["files"] == {"candidate": hashlib.sha256(b"good\n").hexdigest()}
+        assert git(workspace / "repo", "show", accepted["commit"] + ":candidate") == "good"
         print("Verified keep, pause, resume, rejection, discard, attempt accounting and original source tree.")
 
 

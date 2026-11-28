@@ -9,8 +9,8 @@
     {
       "name": "deadlion",
       "source": "./plugins/deadlion",
-      "description": "Core engineering workflow with algorithm contracts, performance checks, hooks and agents",
-      "version": "4.4.0"
+      "description": "Engineering workflow, native OMP quality gates, algorithm contracts and performance checks",
+      "version": "4.5.0"
     },
     {
       "name": "deadlion-triz",

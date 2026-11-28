@@ -6,7 +6,7 @@ Only the latest release of each plugin gets security fixes.
 
 | Plugin | Supported |
 |---|---|
-| `deadlion` 4.3.x | yes |
+| `deadlion` 4.5.x | yes |
 | `deadlion-triz` 4.0.x | yes |
 | anything older | no |
 

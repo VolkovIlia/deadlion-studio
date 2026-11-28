@@ -31,7 +31,10 @@ def inspect(files, *, source=None, deep=False):
         structural_hint = item["code"] in ("C901", "SIM102", "SIM114")
         if not (structural_hint or str(item["code"]).startswith("PERF")):
             raise ValueError(f'Ruff could not analyze {item["filename"]}: {item["message"]}')
-        yield dict(file=item["filename"], line=item["location"]["row"], rule=item["code"],
+        end = item["end_location"]
+        region = dict(startLine=item["location"]["row"], startColumn=item["location"]["column"],
+                      endLine=end["row"], endColumn=end["column"], unit="character")
+        yield dict(source="Ruff", range=region, file=item["filename"], line=item["location"]["row"], rule=item["code"],
                    severity="INFO" if structural_hint else "WARNING", confidence="heuristic",
                    explanation=item["message"], confirm="Review control flow and semantics." if structural_hint
                    else "Measure this path on representative input and verify semantics.")
@@ -81,7 +84,10 @@ def structural(files):
     result = subprocess.run(["ast-grep", "scan", "-c", config, "--json=compact", "--", *files],
                             capture_output=True, text=True, timeout=60, check=True)
     for item in json.loads(result.stdout):
-        yield dict(file=item["file"], line=item["range"]["start"]["line"] + 1,
+        start, end = item["range"]["start"], item["range"]["end"]
+        region = dict(startLine=start["line"] + 1, startColumn=start["column"] + 1,
+                      endLine=end["line"] + 1, endColumn=end["column"] + 1, unit="ast-grep column")
+        yield dict(source="ast-grep", range=region, file=item["file"], line=item["range"]["start"]["line"] + 1,
                    rule=item["ruleId"], severity="WARNING", confidence="heuristic",
                    explanation=item["message"], confirm="Profile on the target workload.")
 
@@ -96,7 +102,7 @@ def post_edit():
                          "additionalContext": json.dumps(findings)}}))
 
 
-def main():
+def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--stdin-name", type=Path, help="analyze Python source read from stdin")
@@ -108,7 +114,11 @@ def main():
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", type=Path, help="private directory for verified clean Ruff snapshots")
     parser.add_argument("paths", nargs="*", type=Path)
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def main():
+    args = arguments()
     if args.stdin_name is not None:
         if args.paths or args.deep or args.stdin_name.suffix != ".py":
             parser.error("--stdin-name expects one Python filename and no paths")
@@ -142,9 +152,11 @@ def main():
     if args.native:
         from native_diagnostics import review
         findings.extend(review(files, coverage))
-    findings = list({(str(Path(d["file"]).resolve()),d["line"],d["rule"]):d for d in findings}.values())
+    from diagnostic_report import aggregate
+    findings = aggregate(findings)
     report = dict(status="CHECKED" if files else "NOT APPLICABLE", scope="Ruff PERF and Deadlion AST rules",
                   files=len(files), diagnostics=findings)
+    report["checked_tools"] = (["ruff"] if python else []) + (["ast-grep"] if native else [])
     if args.infer_cost:
         report["scope"] += " and Infer Cost"
     if args.native:

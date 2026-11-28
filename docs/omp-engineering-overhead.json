@@ -1,0 +1,147 @@
+{
+  "kernel": "7.2.11-200.fc44.x86_64",
+  "omp": "omp/19.2.1",
+  "transport": "local scripted, one provider request",
+  "rows": [
+    {
+      "files": 12,
+      "repeat": 0,
+      "enabled": true,
+      "elapsed_ms": 502,
+      "messages_json_chars": 16303
+    },
+    {
+      "files": 12,
+      "repeat": 0,
+      "enabled": false,
+      "elapsed_ms": 265,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 12,
+      "repeat": 1,
+      "enabled": false,
+      "elapsed_ms": 271,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 12,
+      "repeat": 1,
+      "enabled": true,
+      "elapsed_ms": 460,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 12,
+      "repeat": 2,
+      "enabled": true,
+      "elapsed_ms": 465,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 12,
+      "repeat": 2,
+      "enabled": false,
+      "elapsed_ms": 271,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 12,
+      "repeat": 3,
+      "enabled": false,
+      "elapsed_ms": 275,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 12,
+      "repeat": 3,
+      "enabled": true,
+      "elapsed_ms": 476,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 12,
+      "repeat": 4,
+      "enabled": true,
+      "elapsed_ms": 458,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 12,
+      "repeat": 4,
+      "enabled": false,
+      "elapsed_ms": 273,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 10000,
+      "repeat": 0,
+      "enabled": true,
+      "elapsed_ms": 1297,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 10000,
+      "repeat": 0,
+      "enabled": false,
+      "elapsed_ms": 412,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 10000,
+      "repeat": 1,
+      "enabled": false,
+      "elapsed_ms": 423,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 10000,
+      "repeat": 1,
+      "enabled": true,
+      "elapsed_ms": 1258,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 10000,
+      "repeat": 2,
+      "enabled": true,
+      "elapsed_ms": 1264,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 10000,
+      "repeat": 2,
+      "enabled": false,
+      "elapsed_ms": 390,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 10000,
+      "repeat": 3,
+      "enabled": false,
+      "elapsed_ms": 410,
+      "messages_json_chars": 13779
+    },
+    {
+      "files": 10000,
+      "repeat": 3,
+      "enabled": true,
+      "elapsed_ms": 1274,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 10000,
+      "repeat": 4,
+      "enabled": true,
+      "elapsed_ms": 1270,
+      "messages_json_chars": 14727
+    },
+    {
+      "files": 10000,
+      "repeat": 4,
+      "enabled": false,
+      "elapsed_ms": 401,
+      "messages_json_chars": 13779
+    }
+  ]
+}
