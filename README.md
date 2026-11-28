@@ -8,7 +8,7 @@ Deadlion Studio provides an engineering workflow for OMP, Claude Code and Codex.
 The core plugin takes a project from design to release. Its performance tools
 compare implementations against a fixed workload, correctness oracle and resource budget.
 
-**Deadlion Studio 4.6.4** resumes existing OMP tasks after a plugin update and verifies their changes against the original baseline. [Release downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4) · [OMP recovery and migration](docs/omp-recovery.md)
+**Deadlion Studio 4.6.5** returns verification failures to the OMP agent for repair and delivers the checked result for human review. [Release downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.5) · [OMP recovery and migration](docs/omp-recovery.md)
 
 `dl-perf scale` measures how runtime, memory and operation counts change across input sizes and distributions. It reports which growth models fit the measured range and where the evidence cannot distinguish between them.
 
@@ -41,7 +41,7 @@ omp plugin install --scope user deadlion@deadlion-studio
 omp plugin list
 ```
 
-Look for `deadlion@deadlion-studio (4.6.4) (user)` under Marketplace Plugins. For an existing Marketplace install, run the following from the target project and restart OMP when the upgrade finishes.
+Look for `deadlion@deadlion-studio (4.6.5) (user)` under Marketplace Plugins. For an existing Marketplace install, run the following from the target project and restart OMP when the upgrade finishes.
 
 ```sh
 omp plugin marketplace update deadlion-studio &&
@@ -58,7 +58,7 @@ omp plugin discover deadlion-studio
 
 Run `omp plugin upgrade deadlion@deadlion-studio` again if Deadlion is already installed from Marketplace.
 
-If you previously used `omp plugin link`, OMP lists `deadlion-studio@4.6.4` under npm Plugins. Before switching that installation to Marketplace, confirm `omp plugin discover deadlion-studio` offers the expected release. Then replace the link with the Marketplace installation.
+If you previously used `omp plugin link`, OMP lists `deadlion-studio` under npm Plugins. Before switching that installation to Marketplace, confirm `omp plugin discover deadlion-studio` offers the expected release. Then replace the link with the Marketplace installation.
 
 ```sh
 omp plugin uninstall deadlion-studio &&
@@ -66,7 +66,7 @@ omp plugin install --scope user deadlion@deadlion-studio &&
 omp plugin list
 ```
 
-Start OMP in your project. Run `/deadlion setup` to inspect recommended checks and approve the functional scope of discovered tests, or `/deadlion doctor` to inspect compatibility and available tools. For CI, `dl-omp --seconds N` bounds the run and returns exit code 0 after validating the receipt and current workspace. [Verification approval](docs/omp-recovery.md#verification-approval)
+Start OMP in your project and give the agent the goal. It plans, verifies, and repairs within the session's tool permissions and resource budgets. `/deadlion doctor` inspects available tools. For CI, `dl-omp --seconds N` bounds the run and returns exit code 0 after validating the receipt and current workspace. [Autonomous verification](docs/omp-recovery.md#autonomous-verification)
 
 ### Claude Code
 

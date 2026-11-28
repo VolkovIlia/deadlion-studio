@@ -1,5 +1,4 @@
 """Exercise engineering recovery through real OMP and a loopback scripted provider."""
-from hashlib import sha256
 from http.server import HTTPServer
 import json
 import queue
@@ -10,7 +9,7 @@ import subprocess
 import tempfile
 import threading
 
-from omp_engineering_smoke import PLUGIN, Transport, trial
+from omp_engineering_smoke import PLUGIN, Transport, fixture, trial
 from omp_refactoring_smoke import prepare
 from omp_stability_smoke import environment, write
 
@@ -36,7 +35,7 @@ def productive(root, server):
 
     policy.write_text(json.dumps({"checks": [checks_for("candidate", 10)]}))
     report = trial(source, options, server, {0: write("candidate", "a"), 2: write("candidate", "b"),
-                                            4: write("candidate", "a")}, "BLOCKED", None)
+                                            4: write("candidate", "a")}, "INCOMPLETE", None)
     task = json.loads((root / "state/deadlion" / report["task"] / "task.json").read_bytes())
     assert task["recovery"]["recent"][-1]["cycle"], task["recovery"]
 
@@ -114,7 +113,7 @@ def campaign(root, server, replan=False, dirty=False):
         assert verdict["report"]["status"] == "PASS"
         check_campaign_upgrade(command, installed, directory)
     elif dirty:
-        verdict = run({0: write("broken.txt", "unverified candidate\n")}, "BLOCKED")
+        verdict = run({0: write("broken.txt", "unverified candidate\n")}, "INCOMPLETE")
         current = json.loads((directory / "plan-state.json").read_bytes())
         assert current["results"] == {} and (directory / "active.json").is_file()
         assert "Unverified milestone edits remain" in verdict["reason"]
@@ -128,7 +127,7 @@ def campaign(root, server, replan=False, dirty=False):
                 sent = True
                 return write("good.txt", "good independent result\n")
 
-        run(steps, "BLOCKED")
+        run(steps, "INCOMPLETE")
         current = json.loads((directory / "plan-state.json").read_bytes())
         assert current["status"] == "ACTIVE" and set(current["results"]) == {"T2"}, current
         assert current["milestones"]["T1"] == "DEFERRED" and "T3" not in current["results"]
@@ -202,7 +201,7 @@ def native_goal(root, server, approval_pending=False, verifier_changed=False):
                 update_installation(plugin)
                 return write("candidate", "bad")
         server.steps = update
-    pending = "AWAITING_RESTART" if verifier_changed else "AWAITING_APPROVAL" if approval_pending else None
+    pending = "AWAITING_RESTART" if verifier_changed else "INCOMPLETE" if approval_pending else None
     process = subprocess.Popen(["omp", "--mode", "rpc", "--offline", "--no-judge", "--no-spotlight"],
                                cwd=source, env=options, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, text=True)
@@ -235,8 +234,8 @@ def native_goal(root, server, approval_pending=False, verifier_changed=False):
         assert first["success"]
         until(lambda event: event.get("type") == "session_settled" and verdict.exists())
         failed = json.loads(verdict.read_bytes())
-        assert failed["state"] == (pending or "BLOCKED"), failed
-        if pending:
+        assert failed["state"] == (pending or "INCOMPLETE"), failed
+        if verifier_changed:
             stored = root / "state/deadlion" / failed["task"] / "task.json"
             assert json.loads(stored.read_bytes())["corrections"] == 0, failed
         send(type="goal", op="get", id="goal")
@@ -315,61 +314,80 @@ def verifier_upgrade(root, server):
     assert evidence["status"] == "NOT VERIFIED" and "verification inputs" in evidence["checks"][0]["reason"], result
 
 
-def scope_approval(root, server):
-    source, env, session = prepare(root, server)
-    Path(env["DL_ENGINEERING_POLICY"]).write_text("{}")
-    test = source / "tests/test_candidate.py"
-    test.parent.mkdir()
-    test.write_text("from pathlib import Path\nassert Path('candidate').read_text() == 'correct'\n")
-    launch = [PLUGIN / "omp/dl-omp", "--offline", "--resume", session, "--seconds", "24"]
-    command = ["omp", "--offline", "--no-judge", "--no-spotlight", "--resume", session, "-p"]
+def import_recovery(root, server):
+    source, env = environment(root, server)
+    test = "tests/test_module_discovery_imports.py"
+    ratchet = "tests/assertionless-tests-baseline.json"
+    common = 'import importlib\nimport pytest\n\nMODULE_NAMES = ["json"] * 1376\n\ndef test_discovery():\n    assert MODULE_NAMES\n\n'
+    old = common + '@pytest.mark.parametrize("name", MODULE_NAMES)\ndef test_a_module_imports(name):\n    importlib.import_module(name)\n'
+    grouped = "import traceback\n" + common + '''@pytest.mark.parametrize("names", [MODULE_NAMES[i:i+30] for i in range(0, len(MODULE_NAMES), 30)])
+def test_a_module_imports(names):
+    failures = []
+    for name in names:
+        try:
+            importlib.import_module(name)
+        except Exception:
+            failures.append(traceback.format_exc())
+    if failures:
+        pytest.fail("\\n".join(failures))
+'''
+    (source / "tests").mkdir()
+    (source / test).write_text(old)
+    (source / ratchet).write_text(json.dumps([test + "::test_a_module_imports", "tests/other.py::test_assertionless"]))
+    fixture.git(source, "add", "tests")
+    fixture.git(source, "-c", "user.name=Smoke", "-c", "user.email=test@fixture", "commit", "-qm", "original import tests")
+    prepare_check = ("deadlion_verify", {"action": "characterize_imports", "path": test, "ratchet": ratchet})
+    original = {}
 
-    def run(steps, state, requests):
-        server.steps, server.context, server.calls = steps, [], 0
-        result = subprocess.run([*launch, "Implement the scoped engineering task."], cwd=source, env=env,
-                                text=True, capture_output=True, timeout=29)
-        verdict = json.loads(result.stdout)
-        assert verdict["state"] == state and server.calls == requests, (verdict, server.calls, result.stderr)
-        return verdict
+    def steps(index, _request):
+        if index in (4, 7, 12):
+            file, = (root / "state/deadlion").glob("*/task.json")
+            state = json.loads(file.read_bytes())
+            if index == 4:
+                original.update(task=state["id"], baseline=state["baselineHash"])
+            return "bash", {"command": state["importCheck"]["command"]}
+        return {
+            0: write(test, grouped.replace('pytest.fail("\\n".join(failures))', "return")),
+            1: write(ratchet, '["tests/other.py::test_assertionless"]'),
+            3: prepare_check,
+            5: write(test, grouped),
+            6: prepare_check,
+            8: ("deadlion_verify", {}),
+            9: write(test, grouped + "\n# Checkout changed after the first receipt.\n"),
+            10: ("deadlion_verify", {}),
+            11: prepare_check,
+            13: ("deadlion_verify", {}),
+        }.get(index)
 
-    def approve(approval, digest=None):
-        policy = root / "reviewed-checks.json"
-        policy.write_text(json.dumps(approval))
-        token = digest or sha256(policy.read_bytes()).hexdigest()
-        subprocess.run([*command, f"/deadlion approve-tests {token} {policy}"], cwd=source, env=env,
-                       capture_output=True, check=True, timeout=15)
+    report = trial(source, env, server, steps, "VERIFIED", None, "Group the import test and preserve its behavior.")
+    assert report["task"] == original["task"] and report["baselineHash"] == original["baseline"], report
+    assert "Group body does not match" in server.context[5] and "Establish scoped functional evidence" in server.context[3]
+    assert "Establish scoped functional evidence" in json.loads(server.context[11])[-1]["content"]
+    check, = [item for item in report["checks"] if item["name"] == "independent import characterization"]
+    assert set(check["coverage"]["paths"]) == {test, ratchet}
+    assert check["data"]["metrics"] == {"imports": 1376, "groups": 46, "injectedFailures": 2, "passed": 47}
 
-    run_shell = ("bash", {"command": "printf correct > candidate; printf '\n# Reviewed test revision\n' >> tests/test_candidate.py; python3 tests/test_candidate.py"})
-    waiting = run({0: run_shell}, "AWAITING_APPROVAL", 2)
-    assert waiting["report"]["status"] == "NOT VERIFIED"
-    assert waiting["report"]["failures"][0]["approval"]["kind"] == "functional-scope"
-    path = root / "state/deadlion" / waiting["task"] / "task.json"
-    original = json.loads(path.read_bytes())
 
-    continued = run({0: write("notes.md", "# Independent work\n")}, "AWAITING_APPROVAL", 2)
-    assert continued["task"] == waiting["task"] and (source / "notes.md").is_file()
-    check = {"name": "reviewed candidate suite", "type": "functional", "scope": ["candidate", "tests"],
-             "argv": ["python3", "-c", "import runpy; runpy.run_path('tests/test_candidate.py')"]}
-    approve({"checks": [check]}, digest="0" * 64)
-    assert not json.loads(path.read_bytes()).get("testApprovals")
-    approve({"checks": [check]})
-    pending = run({}, "AWAITING_APPROVAL", 1)
-    assert pending["report"]["failures"][0]["approval"]["kind"] == "test-revision"
-
-    revision = {"testRevision": {"tests/test_candidate.py": sha256(test.read_bytes()).hexdigest()}}
-    approve(revision)
-    final = run({}, "VERIFIED", 1)
-    assert final["task"] == waiting["task"]
-    saved = json.loads(path.read_bytes())
-    assert saved["baselineHash"] == original["baselineHash"] and saved["goal"] == original["goal"]
-    assert len(saved["testApprovals"]) == 2
-    test.write_text(test.read_text() + "# Subsequent unreviewed edit\n")
-    command_result = subprocess.run([*command, "/deadlion verify"], cwd=source, env=env,
-                                    text=True, capture_output=True, check=True, timeout=20)
-    gate_files = sorted(path.parent.glob("gate-*.json"), key=lambda file: file.stat().st_mtime_ns)
-    latest = json.loads(gate_files[-1].read_bytes())
-    assert any(row.get("approval", {}).get("kind") == "test-revision" for row in latest["checks"]), command_result
-    assert latest["status"] != "PASS"
+def agent_campaign(root, server):
+    source, env = environment(root, server)
+    checks = [checks_for(path, 1) for path in ("api.txt", "storage.txt")]
+    policy = root / "policy.json"
+    policy.write_text(json.dumps({"checks": checks}))
+    env["DL_ENGINEERING_POLICY"] = str(policy)
+    plan = "# Campaign\nStatus: active\n\n"
+    plan += stage("T1", "api.txt", "Implement API", "—", checks[0]["name"])
+    plan += "\n" + stage("T2", "storage.txt", "Implement storage", "T1", checks[1]["name"])
+    steps = {0: write("plan.md", plan), 1: ("deadlion_verify", {"action": "campaign", "path": "plan.md"}),
+             2: write("api.txt", "api\n"), 3: ("deadlion_verify", {}),
+             4: write("storage.txt", "storage\n"), 5: ("deadlion_verify", {})}
+    goal = "Implement API and storage within the supplied constraints."
+    report = trial(source, env, server, steps, "VERIFIED", None, goal)
+    directory, = (entry for entry in (root / "state/deadlion/refactoring").iterdir() if entry.is_dir())
+    state = json.loads((directory / "plan-state.json").read_bytes())
+    initial = json.loads((directory / "global.json").read_bytes())
+    assert state["status"] == "COMPLETED" and set(state["results"]) == {"T1", "T2"}
+    assert state["goal"] == goal and "plan.md" not in initial["baseline"]["files"]
+    assert report["baselineHash"] == state["baseline"] == initial["source"]
 
 
 if __name__ == "__main__":
@@ -378,10 +396,10 @@ if __name__ == "__main__":
         for name, run in (("productive", productive), ("deferral", campaign),
                           ("replan", lambda root, server: campaign(root, server, True)),
                           ("dirty-checkpoint", lambda root, server: campaign(root, server, dirty=True)),
-                          ("budget", budget_resume), ("native-goal", native_goal), ("scope-approval", scope_approval),
-                          ("native-goal-awaiting-approval", lambda root, server: native_goal(root, server, True)),
+                          ("budget", budget_resume), ("native-goal", native_goal), ("import-recovery", import_recovery),
+                          ("native-goal-scope-gap", lambda root, server: native_goal(root, server, True)),
                           ("native-goal-verifier-upgrade", lambda root, server: native_goal(root, server, verifier_changed=True)),
-                          ("verifier-upgrade", verifier_upgrade)):
+                          ("verifier-upgrade", verifier_upgrade), ("agent-campaign", agent_campaign)):
             with tempfile.TemporaryDirectory(prefix="slopzero-") as temporary:
                 run(Path(temporary), transport)
                 print("PASSED", name)

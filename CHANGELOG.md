@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.5] - 2026-11-28
+
+- Return verification failures to the OMP agent through native advisory continuation. Resume legacy approval waits with the original task and baseline. Keep explicit budgets and final receipt checks.
+- Start, advance, defer and replan campaigns from the model-facing verifier. The OMP workflow carries technical artifacts through to human review of the result.
+- Verify Python import-test grouping against the recorded baseline and a full native pytest run. Bind the evidence to the exact checkout, even when the detection baseline also changes.
+
 ## [4.6.4] - 2026-11-28
 
 - Keep the OMP Goal active when the installed verifier changes during a turn. Record `AWAITING_RESTART · NOT VERIFIED` without a forced corrective turn.
@@ -84,7 +90,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.4...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.5...HEAD
+[4.6.5]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.5
 [4.6.4]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4
 [4.6.3]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3
 [4.6.2]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.2

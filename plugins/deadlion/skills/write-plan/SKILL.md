@@ -8,10 +8,7 @@ description: "Turns approved product/design/architecture artifacts or a clear re
 Artifact contract (paths, `Status:` line, sections): `${CLAUDE_SKILL_DIR}/../workflow/references/artifacts.md`.
 
 ## Inputs
-Read whatever exists in `.dev-docs/features/<slug>/`: `product.md` (acceptance criteria),
-`design.md` (screens, states), `arch.md` (components, interfaces). Use only artifacts with
-`Status: approved`; if one is draft, show it and ask the user to approve first. With no
-artifacts, plan from the request and read the code it touches.
+Read `product.md`, `design.md` and `arch.md` under `.dev-docs/features/<slug>/` when present. In autonomous OMP, validate working inputs against the request and existing contracts. In interactive review, use approved artifacts. With no artifacts, plan from the request and read the relevant code.
 
 ## Rules
 - Each task touches ≤1 component and ≤3 files. Bigger → split it.
@@ -52,8 +49,7 @@ Depends: —
 `Depends:` lists task ids or `—`. `build` flips `- [ ] done` to `- [x] done`.
 
 ## Finish
-Show the task list (one line per task) and ask the user to approve. On approval set
-`Status: approved`. For a one-file change the plan may stay inline in the conversation.
+In autonomous OMP, set `Status: active` and proceed to build after validating scope, dependencies and checks. In interactive review, present the task list for approval. A one-file plan may stay inline.
 
 For performance-sensitive work, freeze the workload, reference answer, build configuration and allowed regression before implementation.
 For Performance, Research and Evolution attach a JSON contract to the plan and run the performance skill's scripts/dl-contract. The indexed-membership eval supplies a worked example. Structural validation checks presence and shape; the reviewer assesses the bounds and invariant.

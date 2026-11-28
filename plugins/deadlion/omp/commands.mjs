@@ -7,7 +7,6 @@ import { servers } from "./lsp.mjs";
 import { compatibility } from "./omp-compat.mjs";
 import { setup } from "./setup.mjs";
 import { budgetStatus, exhausted, limit, operationTimeout, timeLeft, tokensUsed } from "./execution.mjs";
-import { approveTaskTests } from "./test-approval.mjs";
 
 async function approvedWorkloads(task) {
   const { train, holdout } = task.workloads;
@@ -74,7 +73,6 @@ async function runCommand(command, ctx, { pi, taskFor, fullCheck, transition }) 
   const task = await taskFor(ctx, "", false, true);
   if (command === "doctor") return doctor(ctx.cwd, pi.getActiveTools().includes("lsp"), task);
   if (!task) return "Deadlion active. No engineering task started.";
-  if (command.startsWith("approve-tests ")) return approveTaskTests(task, ctx, command.slice(14));
   return taskCommand(command, ctx, task, fullCheck);
 }
 
@@ -112,7 +110,7 @@ function currentStatus(task) {
     task.refactor && `Milestone ${task.refactor.id} · ${task.refactor.step.title}`,
     `Verification ${task.last?.status ?? "pending"} · ${budgetStatus(task)}`,
     latest && `Recovery ${latest.cause} · ${latest.strategy}`,
-    task.designIssue ?? task.policy.setupIssue ?? task.last?.failures?.[0]?.reason,
+    task.last?.failures?.[0]?.reason ?? task.blocker ?? task.designIssue ?? task.policy.setupIssue,
     task.last?.receipt,
   ].filter(Boolean).join("\n");
 }

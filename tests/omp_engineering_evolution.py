@@ -47,7 +47,7 @@ def exercise(source, profile, directory, server):
            "GIT_AUTHOR_NAME": "Smoke", "GIT_COMMITTER_NAME": "Smoke", "GIT_AUTHOR_EMAIL": "smoke@example.invalid",
            "GIT_COMMITTER_EMAIL": "smoke@example.invalid", "DL_PERF_CONTRACT": contracts["design"]}
     subprocess.run(["omp", "plugin", "link", PLUGIN], cwd=source, env=env, check=True, capture_output=True)
-    receipt = trial(source, env, server, {0: ("deadlion_verify", {})}, "BLOCKED", 2)
+    receipt = trial(source, env, server, {0: ("deadlion_verify", {})}, "INCOMPLETE", 2)
     session = next(row[3] for row in map(json.loads, trace.read_text().splitlines()) if row[0] == "before_agent_start")
     server.steps, server.calls, server.context, server.contracts = dict(enumerate(actions)), 0, [], True
     # After task approval only the frozen holdout may affect this experiment.

@@ -142,7 +142,7 @@ def exercise(root, server):
     command("/deadlion refactor reconcile")
     command("/deadlion refactor begin T2")
     refused = edit("unassigned.py", "raise RuntimeError('unexpected')\n")
-    assert refused["state"] == "BLOCKED" and not (source / "unassigned.py").exists(), refused
+    assert refused["state"] == "INCOMPLETE" and not (source / "unassigned.py").exists(), refused
     command("/deadlion refactor cancel")
     assert not (directory / "active.json").exists()
     plan = source / "plan.md"
@@ -157,11 +157,11 @@ def exercise(root, server):
     owner = interrupt(source, env, session, directory, server)
     lock = directory / "active.json"
     assert json.loads(lock.read_bytes())["owner"]["pid"] == owner
-    command("/deadlion refactor recover")
-    assert json.loads(lock.read_bytes())["status"] == "PAUSED"
     api = "from storage import read\nanswer = read()\n"
     second = edit("api.py", api, delegate=True)
     assert second["state"] == "VERIFIED" and second["task"] != first["task"], second
+    assert any(json.loads(path.read_bytes())["operation"] == "automatic-resume"
+               for path in (directory / "recovery").glob("*.json"))
     assert {"api.py", "storage.py"} <= set(second["report"]["paths"]), second
     assert (directory / "global.json").read_bytes() == baseline
     command("/deadlion refactor verify")
@@ -209,7 +209,7 @@ def exercise(root, server):
     assert json.loads((directory / "global.json").read_bytes())["baselineStatus"] == "FAIL"
     command("/deadlion refactor begin T1")
     exceeded = edit("legacy.py", "answer = 42\n")
-    assert exceeded["state"] == "BLOCKED", exceeded
+    assert exceeded["state"] == "INCOMPLETE", exceeded
     assert any(check["name"] == "trusted profile" and check["status"] == "FAIL"
                for check in exceeded["report"]["failures"]), exceeded
     print("VERIFIED milestones, operator checkpoint, SIGKILL recovery, stale receipts, archive and new campaign")

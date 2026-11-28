@@ -1,5 +1,4 @@
-"""Exercise timeout, decline and resend against a real OMP TUI and local provider."""
-import json
+"""Exercise draft retention at an explicit budget limit in a real OMP TUI."""
 import os
 from pathlib import Path
 import tempfile
@@ -29,29 +28,16 @@ class LocalServer(HTTPServer):
         self.release = threading.Event()
 
 
-def assert_recovery(proc, policy, server, columns):
+def assert_recovery(proc, server, columns):
     proc.expect_exact("Deadlion: working…")
     proc.expect_exact("wall-clock budget exhausted")
-    policy.write_text('{"seconds": 10}')
     server.release.set()
     proc.send(PROMPT + "\r")
-    proc.expect_exact("Deadlion: start a new task?")
-    proc.expect_exact("Yes")
-    if columns == 80:
-        proc.send("\x1b[B\r")
-        proc.expect_exact("Deadlion: message not sent")
-        assert not any(PROMPT in context for context in server.context), server.context
-        proc.send("\r")  # Submit the draft retained by the plugin.
-        proc.expect_exact("Deadlion: start a new task?")
-        proc.expect_exact("Yes")
-    proc.send("\r")
-    proc.expect_exact("Finished.")
-    messages = next(json.loads(context) for context in server.context
-                    if PROMPT in context and "<title-request>" not in context)
-    texts = [part.get("text") for message in messages if message["role"] == "user"
-             for part in message["content"] if isinstance(part, dict)]
-    assert texts.count(PROMPT) == 1, texts
-    print(f"{columns} columns: working, timeout, confirmation; prompt reached provider once", flush=True)
+    proc.expect_exact("Deadlion · NOT VERIFIED")
+    proc.expect_exact(PROMPT)
+    assert "Deadlion: start a new task?" not in proc.before
+    assert not any(PROMPT in context for context in server.context), server.context
+    print(f"{columns} columns: timed-out task retains the draft without asking for confirmation", flush=True)
 
 
 def smoke(rows, columns):
@@ -71,7 +57,7 @@ def smoke(rows, columns):
         proc = pexpect.spawn("omp", args, cwd=str(source), env=env, dimensions=(rows, columns),
                              encoding="utf-8", timeout=6)
         try:
-            assert_recovery(proc, policy, server, columns)
+            assert_recovery(proc, server, columns)
         finally:
             server.release.set()
             proc.terminate(force=True)

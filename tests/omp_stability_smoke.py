@@ -49,12 +49,12 @@ def coverage(source, env, server):
     make_component(source, "backend", 42)
     (source / "schemas").mkdir()
     approve(source, env, ["frontend"])
-    report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 0;\n")}, "AWAITING_APPROVAL", 2)
+    report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 0;\n")}, "INCOMPLETE", 3)
     assert report["coverage"][0]["status"] == "NOT VERIFIED"
     assert any(c["status"] == "PASS" and c["coverage"]["paths"] == ["frontend"]
                for c in report["checks"] if c["name"].startswith("plan:"))
     (source / "backend/logic.cjs").write_text("module.exports = 42;\n")
-    report = trial(source, env, server, {0: write("schemas/shared.proto", 'syntax = "proto3";\n')}, "AWAITING_APPROVAL", 2)
+    report = trial(source, env, server, {0: write("schemas/shared.proto", 'syntax = "proto3";\n')}, "INCOMPLETE", 3)
     assert report["coverage"][0]["affectedComponents"] == ["backend", "frontend"]
     approve(source, env, ["frontend", "backend"])
     report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 42; // preserved\n")}, "VERIFIED", None)
@@ -62,7 +62,7 @@ def coverage(source, env, server):
     report = trial(source, env, server, {0: write("schemas/shared.proto", 'syntax = "proto3";\npackage shared;\n')}, "VERIFIED", None)
     assert report["coverage"][0]["status"] == "VERIFIED"
     (source / "backend/behavior.cjs").write_text("require('node:test').skip('not run', () => {});\n")
-    report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 42; // new edit\n")}, "BLOCKED", None)
+    report = trial(source, env, server, {0: write("backend/logic.cjs", "module.exports = 42; // new edit\n")}, "INCOMPLETE", None)
     assert any(c.get("coverage", {}).get("execution", {}).get("incomplete") for c in report["checks"]), report["checks"]
 
 
@@ -74,7 +74,7 @@ def staged_mismatch(source, env, server):
         "from pathlib import Path; assert Path('candidate').read_text() == 'working\\n'"],
         "testsScope": ["candidate"], "maxCorrections": 0}))
     report = trial(source, {**env, "DL_ENGINEERING_POLICY": str(path)},
-                   server, {0: write("candidate", "working\n")}, "BLOCKED", None)
+                   server, {0: write("candidate", "working\n")}, "INCOMPLETE", None)
     assert any(c["name"] == "index differs from tested files" for c in report["checks"])
 
 
@@ -87,7 +87,7 @@ def ignored_input(source, env, server):
         "from pathlib import Path; assert Path('backend/logic.cjs').is_file()"],
         "testsScope": ["backend"], "verificationInputs": ["build/oracle.txt"], "maxCorrections": 0}))
     report = trial(source, {**env, "DL_ENGINEERING_POLICY": str(path)}, server,
-                   {0: write("build/oracle.txt", "changed\n")}, "BLOCKED", None)
+                   {0: write("build/oracle.txt", "changed\n")}, "INCOMPLETE", None)
     assert any("verification inputs" in c.get("reason", "") for c in report["checks"]), report["checks"]
 
 

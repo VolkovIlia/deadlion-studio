@@ -9,9 +9,8 @@ argument-hint: "<slug>"
 Artifact contract: `${CLAUDE_SKILL_DIR}/../workflow/references/artifacts.md`.
 
 ## Start
-1. Slug = `$ARGUMENTS`; if empty, use the only directory in `.dev-docs/features/`, or ask.
-2. Read `.dev-docs/features/<slug>/plan.md`. If `Status:` is not `approved`, show it and ask
-   the user to approve. Never build a draft.
+1. Resolve the feature from `$ARGUMENTS`, the active task or the matching plan in `.dev-docs/features/`.
+2. Read `plan.md`. In autonomous OMP, validate the plan against the task and use `Status: active`. In interactive review, use the approved plan.
 3. Run the project's test command once to record the baseline. Pre-existing failures are
    noted, not fixed silently.
 
@@ -30,10 +29,7 @@ at once. Tasks in the same project, with `Project: —`, or touching `contracts/
      verify skill).
 3. **Review.** Dispatch the `deadlion:reviewer` subagent with the task block and the diff
    scope (`git diff` of the task's files). It returns finding lines and `VERDICT:`.
-4. **Repair.** If verify failed or any `BLOCKING` finding exists, re-dispatch the
-   implementer with the failure output / findings. After 2 failed repair rounds on the same
-   task, stop and report to the user: task id, what fails, the evidence. Do not continue to
-   dependent tasks.
+4. **Repair.** Return failed checks and blocking findings to the implementer. In autonomous OMP, change strategy when evidence stops improving. Use the verifier to replan or defer failed stages and continue ready independent work. Leave dependencies open until their checks pass. In interactive review, report a stalled repair for review.
 5. **Mark done.** Flip the task's line to `- [x] done` in `plan.md`. `IMPORTANT`/`NIT`
    findings that were not fixed are listed in the final report.
 

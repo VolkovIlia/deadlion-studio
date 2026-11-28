@@ -59,16 +59,20 @@ export async function activateMilestone(ctx, task) {
   await withCampaignLock(directory, async () => {
     const current = await read(state(directory));
     const active = await read(reservation(directory));
-    if (current.id !== campaign || current.status !== "ACTIVE" ||
+    if (current.id !== campaign || current.status !== "ACTIVE" || current.planHash !== task.refactor.planHash ||
         active.task !== task.id || active.checkpoint !== task.baselineHash)
       throw new Error("Milestone reservation is no longer current");
     if (active.session !== ctx.sessionManager?.getSessionId())
       throw new Error("Resume the OMP session that owns this milestone");
     const owner = await ownerIdentity();
-    if (await ownerAlive(active.owner) && active.owner.pid !== owner.pid)
+    const live = await ownerAlive(active.owner);
+    if (live && active.owner.pid !== owner.pid)
       throw new Error("Milestone is already running in another OMP process");
-    if (active.owner && active.owner.pid !== owner.pid && active.status === "ACTIVE")
-      throw new Error("Recover the interrupted milestone before resuming");
+    if (!live && active.owner && active.status === "ACTIVE") {
+      const prior = await checkpoint(directory, current);
+      const tree = await snapshot(task.root);
+      await recordRecovery(directory, active, changes(prior, tree), "automatic-resume", current.checkpoint, tree);
+    }
     await save(reservation(directory), { ...active, owner, status: "ACTIVE" });
   });
 }
@@ -79,7 +83,7 @@ export async function parkMilestone(task) {
   await withCampaignLock(directory, async () => {
     const active = await optional(reservation(directory));
     if (active?.task !== task.id || active.owner?.pid !== process.pid) return;
-    const status = task.state === "BLOCKED" ? "FAILED" : "PAUSED";
+    const status = ["BLOCKED", "INCOMPLETE"].includes(task.state) && task.last?.failures?.length ? "FAILED" : "PAUSED";
     const current = await read(state(directory));
     current.execution = executionSnapshot(task);
     await save(state(directory), current);

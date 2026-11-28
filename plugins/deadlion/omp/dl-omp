@@ -27,6 +27,8 @@ def feed(stream, events):
 
 
 def validated(verdict, deadline):
+    if verdict.get("state") == "RECOVERING":
+        return {**verdict, "state": "INCOMPLETE"}
     if verdict.get("state") != "VERIFIED":
         return verdict
     try:

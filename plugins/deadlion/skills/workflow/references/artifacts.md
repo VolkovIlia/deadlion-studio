@@ -28,15 +28,15 @@ Every artifact starts with exactly:
 
 ```
 # <Title>
-Status: draft|approved
+Status: draft|active|approved
 ```
 
-- A skill writes `Status: draft`. Only the user approves; then set `Status: approved`.
-- A downstream stage proceeds only when its inputs are `approved`.
+- In autonomous OMP, the agent validates requirements and sets ready artifacts to `Status: active`. Existing approved artifacts remain valid inputs.
+- In the interactive review workflow, the skill writes `Status: draft` and the user's review sets `Status: approved`.
 
 ## Rules
 
-- A stage reads only the files of earlier stages (order: product → design → system → arch → plan → review). It never edits an upstream file; if an upstream file is wrong, say so and send the user back to that stage.
+- A stage reads the files of earlier stages (order: product → design → system → arch → plan → review). When an upstream decision is wrong, rerun its stage and verify affected downstream work. In autonomous OMP, the main agent owns that recovery.
 - Any stage can run alone or be skipped. A missing upstream file is not an error: use the user's request as input instead.
 - Required `##` sections appear in the order listed, with these exact headings. Extra sections are allowed after them.
 - No placeholders (`TBD`, `TODO`, `...`). Unknowns are written as `[D]` assumptions.

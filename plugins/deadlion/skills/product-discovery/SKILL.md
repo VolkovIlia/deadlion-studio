@@ -47,7 +47,7 @@ Then ask contextual questions ("README says X; does this feature extend Y or add
 7. **Scope by subtraction.** See below.
 8. **Acceptance criteria.** Given/When/Then for each in-scope capability, including at least one error or edge case per capability.
 9. **Success metric.** One metric, baseline, target, time window. Name the North Star if the product has one.
-10. **Write `product.md`** with `Status: draft`, show the path and a ≤10-line summary, and ask for approval.
+10. **Write `product.md`.** In autonomous OMP, record assumptions and use `Status: active` once the scope supports the request. In interactive review, use `Status: draft` and present a concise summary.
 
 ### Clarity scan categories
 
@@ -73,7 +73,7 @@ Gate before writing: all 10 scanned; no ambiguity with Impact ≥4 and Uncertain
 2. Choose the cheapest test that can falsify it within 24–72 h: interviews (5–10), review mining (100+ reviews), survey (50+), competitor analysis, fake-door or prototype.
 3. **Fix the success threshold before the test**, as a number ("≥60% of 7 interviewees describe the pain unprompted"). Never adjust it after seeing results.
 4. Decision rule: threshold met → PROCEED (upgrade the tag to `[B]` or `[A]`); not met → PIVOT.
-5. On PIVOT, write: the result vs. the threshold, why it failed (findings with counts), 2–3 alternative hypotheses (different segment, integrate instead of replace, adjacent pain), and the questions to ask the user. Do not proceed to scope.
+5. On PIVOT, record the threshold, result, reason and two or three alternative hypotheses. In autonomous OMP, test feasible alternatives within the given goal. Keep unsupported acceptance criteria open and proceed with independent work. In interactive review, present the alternatives.
 6. If the test has not run yet, record it as planned with `Decision: pending` and say that build work is a bet on a `[D]`.
 
 ## Scope by subtraction

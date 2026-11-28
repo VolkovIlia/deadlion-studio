@@ -27,7 +27,11 @@ writing any artifact.
 
 Commits happen only on user request via `/deadlion:commit`.
 
-## Procedure
+## Autonomous OMP workflow
+
+Run the chosen stages in one engineering mission. Use `Status: active` for working artifacts after checking them against the request, existing contracts and available evidence. Diagnose and revise technical artifacts in the agent loop. For a multi-stage campaign, start the verified DAG with the `deadlion_verify` campaign action. Return failed checks to implementation and continue ready independent work. Deliver the checked result and receipts for human review.
+
+## Interactive review procedure
 
 1. Pick `<slug>`: kebab-case from the argument (`notes app` → `notes-app`). If a matching dir already exists in `.dev-docs/features/`, reuse it.
 2. Read state: `ls .dev-docs/features/<slug>/ 2>/dev/null` and the first two lines of each file, plus the first two lines of `.dev-docs/system.md`. These are the only state; never keep state elsewhere.

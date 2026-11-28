@@ -61,7 +61,7 @@ export async function setup(cwd, home, approve, save) {
     `Manifests ${manifests.slice(0, 10).join(", ") || "none"}`,
     `Available analyzers ${tools.join(", ") || "none"}`,
     ...suites.map(suite => `Suite ${suite.id} · ${suite.cwd} · ${suite.argv.join(" ")} · ${suite.reason} · proposed ${suite.proposedScope.join(", ") || "unknown"}`),
-    "Functional coverage requires explicit scope approval and a nonempty test result.",
+    "Functional acceptance requires a nonempty run linked to a pinned check or an independent scoped comparison.",
     "Computer Science and structural analysis enabled. Experimental optimization on demand.",
   ];
   if (config) return [...lines, "The operator policy remains active: " + config].join("\n");
@@ -76,7 +76,5 @@ export async function setup(cwd, home, approve, save) {
     lines.push("Project-native analyzers, language servers and tests may execute project code.",
       "Uncovered components · " + (components.join(", ") || "project"));
   }
-  lines.push("/deadlion setup approve " + fingerprint);
-  if (suites.length) lines.push('Append a JSON object such as {"1":["frontend"]} to approve test coverage.');
   return lines.join("\n");
 }

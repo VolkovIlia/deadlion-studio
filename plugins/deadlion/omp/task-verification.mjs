@@ -6,8 +6,11 @@ import { chargeAnalysis, operationTimeout, timeLeft } from "./execution.mjs";
 import { scalingSummary } from "./diagnostics.mjs";
 import { design } from "./design.mjs";
 import { adoptTechnicalPlan } from "./refactor-plan.mjs";
-import { advanceMission } from "./mission.mjs";
-import { awaitsApproval } from "./recovery.mjs";
+import { advanceMission, continueAfterFailure, startMission } from "./mission.mjs";
+import { completeMilestone } from "./refactor.mjs";
+import { recoveryDecision } from "./recovery.mjs";
+import { prepareImportCheck } from "./import-evidence.mjs";
+import { outcome } from "./task-input.mjs";
 
 export const hashTree = async task => digest(JSON.stringify(await snapshot(task.cwd)));
 
@@ -52,30 +55,84 @@ export async function measureBaseline(task, signal) {
 
 export function registerVerifier(pi, controller) {
   if (!pi.registerTool || !pi.zod) return;
+  const running = new WeakSet();
   pi.registerTool({
     name: "deadlion_verify", label: "Deadlion verification",
-    description: "Run approved checks or measure the required baseline. In an autonomous refactoring campaign, action replan can add scoped prerequisite stages to the approved plan after a recorded failure.",
-    parameters: pi.zod.object({ action: pi.zod.enum(["verify", "replan"]).optional(),
-      plan: pi.zod.string().optional(), reason: pi.zod.string().optional() }),
+    description: "Run engineering checks. Start a campaign with action campaign and a project-relative Markdown plan path. verify advances a passing milestone, defer selects independent work after failure, and replan adds scoped prerequisites. characterize_imports prepares a native bash check for grouping a parametrized Python import test.",
+    parameters: pi.zod.object({ action: pi.zod.enum(["verify", "campaign", "replan", "defer", "characterize_imports"]).optional(),
+      plan: pi.zod.string().optional(), reason: pi.zod.string().optional(), path: pi.zod.string().optional(),
+      ratchet: pi.zod.string().optional() }),
     async execute(_id, args, signal, _update, ctx) {
       if (ctx.agent.kind === "sub") throw new Error("The main session owns verification.");
       const task = await controller.taskFor(ctx);
-      if (args?.action === "replan") return replan(controller, task, ctx, args);
-      const report = await controller.fullCheck(task, signal, ctx);
-      const { status, receipt, scaling, failures } = report;
-      const guidance = awaitsApproval(report) ? "Acceptance awaits operator approval. Continue authorized independent work." : undefined;
-      return { content: [{ type: "text", text: JSON.stringify({ status, receipt, scaling, guidance, failures: failures?.slice(0, 5) }) }],
-        details: { receipt } };
+      if (!task) throw new Error("There is no available Deadlion baseline. Continue with native OMP tools.");
+      if (running.has(task)) throw new Error("An engineering check is already running for this task.");
+      running.add(task);
+      try { return await runVerifier(controller, task, ctx, args ?? {}, signal); }
+      finally { running.delete(task); }
     },
   });
+}
+
+async function runVerifier(controller, task, ctx, args, signal) {
+  switch (args.action) {
+    case "campaign": return result({ next: await startMission(controller, task, ctx, args.path, signal) });
+    case "replan": return replan(controller, task, ctx, args);
+    case "defer": return defer(controller, task, ctx);
+    case "characterize_imports": {
+      const check = prepareImportCheck(task, args);
+      await persist(task);
+      return result(check);
+    }
+    default: {
+      const report = await controller.fullCheck(task, signal, ctx);
+      const { status, receipt, scaling, failures } = report;
+      let next;
+      if (status === "PASS" && task.refactor && task.autonomous) {
+        next = await advanceVerified(controller, task, ctx, report);
+      }
+      const guidance = failures?.length ? "Resolve these checks and verify again, or continue independent work. " +
+        "Use native tests and a fixed oracle. For an import test grouping, use characterize_imports." : undefined;
+      return result({ status, receipt, scaling, guidance, failures: failures?.slice(0, 5), next });
+    }
+  }
 }
 
 async function replan(controller, task, ctx, args) {
   if (!task?.autonomous || !task.refactor || !args.plan || !args.reason)
     throw new Error("An active campaign milestone, plan and rationale are required for replanning");
+  if (task.last?.receipt && task.last?.failures?.length && task.recovery?.recent.at(-1)?.receipt !== task.last.receipt)
+    recoveryDecision(task, task.last);
   await adoptTechnicalPlan(task, args.plan, args.reason, ctx);
   task.stageDeferred = true;
   await persist(task);
   const next = await advanceMission(controller, task, ctx, "Accepted technical plan revision");
-  return { content: [{ type: "text", text: next?.reason ?? "Recorded technical revision. Review campaign status." }] };
+  return result({ next: next ?? "Recorded technical revision. Inspect campaign status." });
+}
+
+function result(data) {
+  return { content: [{ type: "text", text: JSON.stringify(data) }], details: { receipt: data.receipt } };
+}
+
+async function advanceVerified(controller, task, ctx, report) {
+  await completeMilestone(task, report);
+  await persist(task);
+  const next = await advanceMission(controller, task, ctx, "Verified milestone " + task.refactor.id);
+  if (next) return next;
+  return openRequirements(task, ctx);
+}
+
+async function defer(controller, task, ctx) {
+  if (!task.last?.failures?.length || !task.autonomous || !task.refactor)
+    throw new Error("An autonomous milestone and a recorded failed check are required.");
+  const next = await continueAfterFailure(controller, task, ctx, task.last.failures[0].reason);
+  if (!next && task.stageDeferred) return result({ next: await openRequirements(task, ctx) });
+  return result({ next: next ?? task.blocker ?? "Dependent work remains open. Inspect the campaign DAG." });
+}
+
+async function openRequirements(task, ctx) {
+  task.state = "INCOMPLETE";
+  task.blocker = "Dependent requirements remain open and no independent milestone is ready.";
+  await outcome(task, ctx);
+  return task.blocker;
 }

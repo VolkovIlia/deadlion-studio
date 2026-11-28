@@ -47,15 +47,16 @@ test("independent verifier can reject a keep even with a claimed improvement", a
 });
 
 
-test("an explicitly required missing gate blocks the OMP stop event", async () => {
+test("a missing mandatory gate returns diagnostic context through OMP advisory continuation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "dl-stop-"));
   process.env.DL_PERF_CONTRACT = join(cwd, "missing.json");
   const handlers = {};
   try {
     performance({ on(name, fn) { handlers[name] = fn; } });
     const result = await handlers.session_stop({}, { cwd });
-    assert.equal(result.decision, "block");
-    assert.match(result.reason, /NOT VERIFIED/);
+    assert.equal(result.continue, true);
+    assert.equal(result.decision, undefined);
+    assert.match(result.additionalContext, /NOT VERIFIED/);
   } finally {
     delete process.env.DL_PERF_CONTRACT;
   }

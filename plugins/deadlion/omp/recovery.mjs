@@ -88,7 +88,6 @@ export function recoveryMessage(task, record) {
     guidance[record.strategy] + goal + (record.receipt ? " Receipt: " + record.receipt : "");
 }
 
-export function awaitsApproval(report) {
-  const failures = report.failures ?? [];
-  return failures.length > 0 && failures.every(failure => failure.approval);
+export function advisory(message) {
+  return { continue: true, additionalContext: message };
 }

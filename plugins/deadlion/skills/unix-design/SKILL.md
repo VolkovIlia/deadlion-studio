@@ -38,7 +38,7 @@ Per-rule checks: `${CLAUDE_SKILL_DIR}/references/unix-rules.md`.
 9. **STRIDE.** One line per row: Spoofing, Tampering, Repudiation, Information
    disclosure, Denial of service, Elevation of privilege — threat at which boundary and
    the mitigation, or `n/a — reason`.
-10. **Write arch.md** with `Status: draft`, then ask the user to approve.
+10. **Write arch.md.** In autonomous OMP, validate the architecture against the request and set `Status: active`. In interactive review, use `Status: draft` for review.
 
 Composition patterns between programs and the general rules (adapters, message passing,
 pipelines over orchestrators, contract first): `${CLAUDE_SKILL_DIR}/../decompose/references/patterns.md`.

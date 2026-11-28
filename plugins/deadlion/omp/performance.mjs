@@ -12,10 +12,10 @@ import { authorizeRefactorTool, bindMilestone, completeMilestone, milestonePromp
 import { activateMilestone, loadReservedTask, parkMilestone, saveMissionBudget } from "./refactor-state.mjs";
 import { interrupted, needsNewTask, outcome, rejectPrompt, resolveTaskInput, resumeInput, showTaskStatus } from "./task-input.mjs";
 import { budgetStatus, chargeAnalysis, chargeTokens, exhausted, limit, migrateExecution, timeLeft, updateBudget } from "./execution.mjs";
-import { awaitsApproval, recoveryDecision, recoveryMessage } from "./recovery.mjs";
+import { advisory, recoveryDecision, recoveryMessage } from "./recovery.mjs";
 import { advanceMission, commitMission, continueAfterFailure } from "./mission.mjs";
 import { hashTree, measureBaseline, registerVerifier, reusableReceipt } from "./task-verification.mjs";
-
+import { captureImportCheck, startImportCheck } from "./import-evidence.mjs";
 // Factories are rebound by OMP. Use a shared lookup only for unambiguous
 // parent identities in this process. The main gate always checks disk again.
 const owners = new Map();
@@ -25,16 +25,15 @@ function locateParent(ctx) {
   return matches.length === 1 ? matches[0].task : undefined;
 }
 
-const entry = "deadlion.engineering.task";
-const transitionEntry = "deadlion.engineering.transition";
+const entry = "deadlion.engineering.task", transitionEntry = "deadlion.engineering.transition";
 const terminal = new Set(["VERIFIED", "BLOCKED", "AWAITING_APPROVAL", "AWAITING_RESTART", "CANCELLED", "INCOMPLETE"]);
-
 class EngineeringSession {
   constructor(pi) {
     this.pi = pi;
   }
 
   tasks = new Map();
+  unavailable = new Set();
   pendingLsp = new Map();
   lastScan = new Map();
   timers = new Map();
@@ -47,6 +46,7 @@ class EngineeringSession {
 
   async taskFor(ctx, prompt = "", newRequest = false, existingOnly = false) {
     const key = this.session(ctx);
+    if (!newRequest && !existingOnly && this.unavailable.has(key)) return;
     const prior = this.tasks.get(key);
     const recorded = newRequest && ctx.sessionManager?.getBranch().filter(e =>
       e.type === "custom" && e.customType === transitionEntry).at(-1);
@@ -80,7 +80,7 @@ class EngineeringSession {
     const task = await prior ?? await restoreTask(ctx, entry, { allowMoved: interactive });
     if (existingOnly) return task;
     const milestone = ["milestone", "campaign"].includes(transition) ? selection.split(" ")[1] : undefined;
-    const input = await resolveTaskInput(task, ctx, selection, newRequest, terminal);
+    const input = resolveTaskInput(task, ctx, selection, newRequest);
     const nativeGoal = this.nativeGoals.get(this.session(ctx));
     if (needsNewTask(task, { milestone, selection: input.selection, newRequest, nativeGoal })) {
       if (task?.refactor && !terminal.has(task.state))
@@ -185,12 +185,15 @@ class EngineeringSession {
     return current && signal ? AbortSignal.any([current, signal]) : current ?? signal;
   }
   async fullCheck(task, signal, ctx) {
+    this.verified.delete(task.id);
     signal = this.signal(ctx, signal);
     const reason = exhausted(task);
     if (reason) throw new Error(reason);
     const baseline = task.designIssue?.startsWith("Run deadlion_verify") && !task.baselineReceipt;
     if (baseline) return measureBaseline(task, signal);
     const report = await verify(task, signal, Infinity, this.semanticProbe(task));
+    task.last = report;
+    task.receipts.push(report.receipt);
     if (report.status === "PASS") this.verified.set(task.id, report);
     await persist(task);
     return report;
@@ -198,6 +201,8 @@ class EngineeringSession {
 
   async before_agent_start(event, ctx) {
     if (ctx.agent?.kind === "sub") return;
+    const key = this.session(ctx);
+    this.unavailable.delete(key);
     showTaskStatus(ctx, "Deadlion: preparing request…");
     let task;
     try {
@@ -205,17 +210,18 @@ class EngineeringSession {
       task = await this.taskFor(ctx, nativeGoal?.objective ?? event.prompt, true);
       if (nativeGoal && !task.nativeGoal) task.nativeGoal = nativeGoal.id;
       if (task.refactor) await activateMilestone(ctx, task);
+      await this.prepareTask(task, ctx);
     } catch (error) {
-      await rejectPrompt(event.prompt, error, ctx);
-      return;
+      this.unavailable.add(key);
+      this.release(ctx, task);
+      return rejectPrompt(error, ctx, event.prompt);
     }
-    await this.prepareTask(task, ctx);
     const skills = task.mode === "Standard" ? "workflow, unix-design, build and verify" :
       "workflow, unix-design, decompose, write-plan, performance, build and verify";
     return { message: { customType: "deadlion.policy", display: false,
       content: `Deadlion ${task.mode} (${task.kind}). Correctness, safety and approved resource limits take priority over simplicity. ` +
       `Use applicable ${skills} skills. Check algorithm, data structures, repeated work, allocations and invariants. ` +
-      "Continue authorized independent work while verification awaits approval or a verifier restart. Keep the pending acceptance visible. " +
+      "Use the autonomous OMP workflow. Update technical plans yourself. Run deadlion_verify, resolve failures and deliver the verified result for review. " +
       (task.designIssue ?? "Supply executable evidence.") + " " + milestonePrompt(task.refactor?.step) } };
   }
 
@@ -247,7 +253,7 @@ class EngineeringSession {
   async tool_call(event, ctx) {
     let task;
     try { task = ctx.agent?.kind === "sub" ? locateParent(ctx) : await this.taskFor(ctx); }
-    catch (error) { return { block: true, reason: "Deadlion initialization failed: " + error.message }; }
+    catch (error) { return { additionalContext: "Deadlion verification unavailable: " + error.message }; }
     if (!task) return;
     const reason = exhausted(task);
     if (reason) return { block: true, reason };
@@ -255,10 +261,10 @@ class EngineeringSession {
       const reason = await authorizeRefactorTool(task, event, ctx, editPaths(event));
       if (reason) return { block: true, reason };
     }
-    if (event.toolName === "lsp" && !this.semanticProbe(task) && event.input?.action !== "status")
-      return { block: true, reason: "Approve project-native language servers with /deadlion setup." };
     if (task.designIssue && !await permitsDesignTool(event, ctx))
-      return { block: true, reason: task.designIssue };
+      return task.designIssue.startsWith("Run deadlion_verify") ? { block: true, reason: task.designIssue } :
+        { additionalContext: task.designIssue };
+    await startImportCheck(task, event, ctx);
     if (task.semgrepTools?.includes(event.toolName))
       this.pendingLsp.set(event.toolCallId, { task: task.id, source: await hashTree(task) });
   }
@@ -281,7 +287,10 @@ class EngineeringSession {
     if (sub) await save(join(task.directory, "sub-" + randomUUID() + ".json"), {
       agent: ctx.agent, tool: event.toolName, paths: editPaths(event), error: event.isError });
 
-    if (!sub) await this.collectSemantic(task, event, ctx);
+    if (!sub) {
+      await captureImportCheck(task, event);
+      await this.collectSemantic(task, event, ctx);
+    }
     if (!["edit", "write"].includes(event.toolName)) {
       event = await this.opaqueEdit(task, event, ctx);
       if (!event) return;
@@ -360,6 +369,7 @@ class EngineeringSession {
     const task = await this.tasks.get(key);
     this.release(ctx, task);
     this.tasks.delete(key);
+    this.unavailable.delete(key);
     this.selections.delete(key);
     this.nativeGoals.delete(key);
     await parkMilestone(task);
@@ -373,7 +383,7 @@ class EngineeringSession {
   }
 
   async session_stop(event, ctx) {
-    if (ctx.agent?.kind === "sub") return;
+    if (ctx.agent?.kind === "sub" || this.unavailable.has(this.session(ctx))) return;
     let task;
     try {
       task = await this.taskFor(ctx, "", false, !!ctx.sessionManager);
@@ -403,22 +413,22 @@ class EngineeringSession {
   }
 
   async afterMilestone(task, ctx) {
-    await persist(task);
+    task.state = "RECOVERING";
+    await outcome(task, ctx);
     const next = await advanceMission(this, task, ctx, "Verified milestone " + task.refactor.id);
-    if (next) return next;
-    task.state = "BLOCKED";
+    if (next) return advisory(next);
+    task.state = "INCOMPLETE";
     task.blocker = "No independent ready milestones. Deferred requirements remain open.";
     await outcome(task, ctx);
   }
 
   async failStop(task, ctx, event, error) {
     if (task) {
-      if (!["CANCELLED", "INCOMPLETE"].includes(task.state)) task.state = event.signal?.aborted ? "CANCELLED" : "BLOCKED";
+      if (!["CANCELLED", "INCOMPLETE"].includes(task.state)) task.state = event.signal?.aborted ? "CANCELLED" : "INCOMPLETE";
       task.last = { status: "NOT VERIFIED", reason: error.message };
       await outcome(task, ctx);
     } else {
-      ctx.ui?.notify("Deadlion BLOCKED: " + error.message, "error");
-      if (process.env.DL_VERDICT_FILE) await save(process.env.DL_VERDICT_FILE, { state: "BLOCKED", reason: error.message });
+      await rejectPrompt(error, ctx);
     }
   }
 
@@ -453,33 +463,23 @@ class EngineeringSession {
 
   async correction(task, event, ctx) {
     const canContinue = !event.signal?.aborted && !exhausted(task);
-    if (canContinue) {
-      if (task.last.failures?.some(check => check.restartRequired)) {
-        task.state = "AWAITING_RESTART";
-        return outcome(task, ctx);
-      }
-      if (awaitsApproval(task.last)) {
-        const next = await continueAfterFailure(this, task, ctx, task.last.failures[0].reason);
-        if (next) return next;
-        task.state = "AWAITING_APPROVAL";
-        return outcome(task, ctx);
-      }
+    if (canContinue && task.last.failures?.some(check => check.restartRequired)) {
+      task.state = "AWAITING_RESTART";
+      return outcome(task, ctx);
     }
     const recovery = recoveryDecision(task, task.last);
     if (!canContinue || task.corrections >= limit(task.maxCorrections) ||
         recovery.repeatedState || recovery.cycle || recovery.strategy === "DEFER") {
-      if (canContinue) {
-        const next = await continueAfterFailure(this, task, ctx, recovery.reason);
-        if (next) return next;
-      }
-      task.state = event.signal?.aborted ? "CANCELLED" : "BLOCKED";
+      task.state = event.signal?.aborted ? "CANCELLED" : "INCOMPLETE";
+      const next = canContinue && await continueAfterFailure(this, task, ctx, recovery.reason);
       await outcome(task, ctx);
+      if (next) return advisory(next);
       return;
     }
     task.corrections++;
     task.state = "RECOVERING";
-    await persist(task);
-    return { decision: "block", reason: recoveryMessage(task, recovery) };
+    await outcome(task, ctx);
+    return advisory(recoveryMessage(task, recovery));
   }
 }
 

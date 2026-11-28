@@ -226,7 +226,7 @@ export function resumeTask(task, selection) {
   if (!["resume", "continue"].includes(selection) && process.env.DL_RESUME_TASK !== "1")
     throw new Error("Use /deadlion new, continue or resume for the unfinished task");
   const reason = exhausted(task);
-  if (reason) throw new Error(reason + ". Use /deadlion budget to continue the same task.");
+  if (reason) throw Object.assign(new Error(reason), { budget: true });
   task.state = "INITIALIZED";
 }
 

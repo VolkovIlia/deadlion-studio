@@ -59,9 +59,8 @@ Output: `.dev-docs/system.md`, `contracts/<name>.md`, `projects/<name>/`, follow
    time, space or condition before compromising; record the result in Decisions. If
    the `deadlion-triz` plugin is installed, offer
    `/deadlion-triz:triz-inventive-solver` for unresolved ones.
-9. **Write `.dev-docs/system.md`** with `Status: draft`. Show the Projects table and
-   ask for approval.
-10. **After approval:**
+9. **Write `.dev-docs/system.md`.** In autonomous OMP, validate the decomposition against the request and set `Status: active`. In interactive review, use `Status: draft`.
+10. **After validation in autonomous OMP or approval in interactive review:**
     - For each project: `${CLAUDE_SKILL_DIR}/../scaffold/scripts/dl-new <lang> <name>`
       (scaffold skill), then write its `.budget` with the agreed numbers.
     - Write the root `Makefile`, verbatim except the list:

@@ -30,38 +30,49 @@ export async function activeRefactor(cwd) {
   return { root, directory, current };
 }
 
-export async function startRefactor(ctx, plan, task, receipt) {
+export async function startRefactor(ctx, plan, task, receipt, autonomous = false) {
   const { root, directory, current } = await activeRefactor(ctx.cwd);
   if (current) throw new Error("A refactoring baseline already exists. See /deadlion refactor report.");
   const spec = await planSource(root, plan);
-  const baseline = await read(join(task.directory, "baseline.json"));
-  const source = digest(JSON.stringify(baseline));
-  if (!baseline.base || task.root !== root || source !== task.baselineHash ||
-      digest(JSON.stringify(await snapshot(root))) !== source)
-    throw new Error("The checkout changed while capturing the global baseline");
+  const { baseline, source, checkout, checkpointHash } = await initialCheckpoint(task, root, spec.path, autonomous);
   const structure = await structuralMetrics(root);
   const architecture = await discover(root);
   const patch = await execute(["git", "diff", "--no-ext-diff", "--binary", baseline.base, "--"], { cwd: root, maxBytes: 32 << 20 });
-  if (patch.code || digest(JSON.stringify(await snapshot(root))) !== source)
+  if (patch.code || digest(JSON.stringify(await snapshot(root))) !== checkpointHash)
     throw new Error("Could not capture a stable original checkout");
   const baselineEvidence = receipt && await read(receipt);
   const baselineStatus = captureStatus(baselineEvidence);
-  task.goal = /^Goal:\s*(.+)$/m.exec(spec.text)?.[1] ?? spec.text.split("\n", 1)[0].replace(/^#+\s*/, "");
+  if (!autonomous) task.goal = /^Goal:\s*(.+)$/m.exec(spec.text)?.[1] ?? spec.text.split("\n", 1)[0].replace(/^#+\s*/, "");
   await persist(task);
   const id = randomUUID();
   await withCampaignLock(directory, async () => {
     if (await optional(state(directory))) throw new Error("A campaign is already present");
-    if (digest(JSON.stringify(await snapshot(root))) !== source)
+    if (digest(JSON.stringify(await snapshot(root))) !== checkpointHash)
       throw new Error("The original checkout changed before baseline acceptance");
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await save(join(directory, "global.json"), { source, baseline, structure, architecture, receipt,
       baselineStatus, measurements: measurementChecks(baselineEvidence),
       baselineTask: task.directory, trackedPatch: patch.stdout });
-    await save(join(directory, "plans", "1.json"), { ...spec, reason: "Original approval" });
+    const checkpointPath = checkpointHash !== source ? "checkpoint-plan-1.json" : undefined;
+    if (checkpointPath) await save(join(directory, checkpointPath), checkout);
+    await save(join(directory, "plans", "1.json"), { ...spec, reason: autonomous ? "Initial technical plan" : "Original approval" });
     await save(state(directory), { ...spec, id, goal: task.goal, status: "ACTIVE", revision: 1, root, execution: executionSnapshot(task),
-      baseline: source, checkpoint: source, results: {}, milestones: {} });
+      baseline: source, checkpoint: checkpointHash, checkpointPath, results: {}, milestones: {} });
   });
   return `Campaign ${id} · snapshot ${baseline.base} · verification ${baselineStatus}`;
+}
+
+async function initialCheckpoint(task, root, plan, autonomous) {
+  const baseline = await read(join(task.directory, "baseline.json"));
+  const source = digest(JSON.stringify(baseline));
+  const checkout = await snapshot(root);
+  const checkpointHash = digest(JSON.stringify(checkout));
+  const protectedPaths = [...task.policy.protectedPaths ?? [], ...task.policy.verificationInputs ?? []];
+  const planOnly = autonomous && documentation(plan) && baseline.base === checkout.base &&
+    !protectedPaths.some(path => contains(path, plan)) && changes(baseline, checkout).every(path => path === plan);
+  if (!baseline.base || task.root !== root || source !== task.baselineHash || checkpointHash !== source && !planOnly)
+    throw new Error("The checkout changed while capturing the global baseline");
+  return { baseline, source, checkout, checkpointHash };
 }
 
 export async function bindMilestone(ctx, id, task) {

@@ -42,9 +42,7 @@ into design.md `## Accessibility gates`. WCAG detail: `${CLAUDE_SKILL_DIR}/refer
 8. **Every state.** For each screen design empty (first use and no results), loading
    (skeleton, never blank), error (what failed + how to recover) and success.
 9. **Copy.** Real text, not lorem ipsum. Buttons are verbs; errors say what to do next.
-10. Write design.md with `Status: draft`. In the reply, show what the user approves: the
-    Target line, the Keys table, the States per screen and the token names with their
-    contrast pairs and ratios; then ask the user to approve.
+10. Write `design.md` with target, keys, states and contrast pairs. In autonomous OMP, check the artifact against the request and set `Status: active`. In interactive review, present the draft for approval.
 
 After implementation, run the `ui-verify` skill against the rung's gates.
 

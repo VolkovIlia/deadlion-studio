@@ -83,14 +83,14 @@ def policy_scenarios(source, env, server, policy):
     assert report["baseline"] == initial and {"a.txt", "b.txt"} <= set(report["paths"])
     (source / ".budget").write_text("sloc 0\n")
     report = trial(source, env, server, {0: ("bash", {"command": "echo 'x=1' > example.py"})},
-                   "BLOCKED", 3)
+                   "INCOMPLETE", 3)
     assert any(c["name"] == "dl-budget" and c["status"] == "FAIL" for c in report["checks"])
     (source / ".budget").unlink()
     policy.write_text(json.dumps({"tests": ["/usr/bin/sleep", "4"], "analysisSeconds": 1}))
-    report = trial(source, env, server, {}, "BLOCKED", 1)
+    report = trial(source, env, server, {}, "INCOMPLETE", 1)
     assert any("timeout" in c.get("reason", "") for c in report["checks"])
     policy.write_text(json.dumps({"tests": ["missing-deadlion-check"]}))
-    report = trial(source, env, server, {}, "BLOCKED", 2)
+    report = trial(source, env, server, {}, "INCOMPLETE", 2)
     assert report["status"] == "NOT VERIFIED", report
     policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."]}))
 
@@ -107,7 +107,7 @@ def approved_checks(source, env, server, policy):
     assert size["exception"] == rule and size["status"] == "WARNING" and size["data"]["code"] == 1
     data = next(c["data"] for c in report["checks"] if c["name"] == "dl-analyze")
     assert {"ruff", "ast-grep"} <= set(data["checked_tools"])
-    report = trial(source, opts, server, {0: ("bash", {"command": "rm table.py"})}, "BLOCKED", 2)
+    report = trial(source, opts, server, {0: ("bash", {"command": "rm table.py"})}, "INCOMPLETE", 2)
     assert any(c["name"] == "plan: generated table present" and c["status"] == "FAIL" for c in report["checks"])
 
 
@@ -127,13 +127,13 @@ def contract_scenarios(source, env, server, policy):
         fixture.git(source, "add", ".performance")
         fixture.git(source, "-c", "user.name=Smoke", "-c", "user.email=test@fixture", "commit", "-qm", "approve")
     def attempt(contents):
-        return trial(source, env, server, {0: ("bash", {"command": f"echo {contents} > candidate"})}, "BLOCKED", 2)
+        return trial(source, env, server, {0: ("bash", {"command": f"echo {contents} > candidate"})}, "INCOMPLETE", 2)
     approve({"peak_rss_kib": 100000})
     report = attempt("incorrect")
     assert any(c["name"] == "approved contracts" and c["status"] != "PASS" for c in report["checks"]), report
     (source / "candidate").write_text("good\n")
     report = trial(source, env, server, {0: ("write", {"path": "unrelated.py", "content": "value = 1\n"})},
-                   "AWAITING_APPROVAL", 2)
+                   "INCOMPLETE", 2)
     assert any(c["name"] == "approved contracts" and c["status"] == "PASS" for c in report["checks"])
     assert [(c["path"], c["status"]) for c in report["coverage"]] == [("unrelated.py", "NOT VERIFIED")]
     (source / "candidate").write_text("previous\n")
@@ -145,7 +145,7 @@ def contract_scenarios(source, env, server, policy):
     report = attempt("good")
     assert "PERFORMANCE REGRESSION" in json.dumps(report["checks"]), report
     report = trial(source, env, server, {0: ("bash", {"command": "echo '{}' > .performance/demo/contract.json"})},
-                   "BLOCKED", 2)
+                   "INCOMPLETE", 2)
     assert any(c["name"] == "approved policy changed" for c in report["checks"])
     fixture.git(source, "restore", ".performance")
 
@@ -164,7 +164,7 @@ def incremental_scenarios(source, env, server, policy):
     (source / "required-file").touch()
     report = trial(source, env, server, {
         0: ("deadlion_verify", {}), 1: ("bash", {"command": "rm required-file"}),
-    }, "BLOCKED", 3)
+    }, "INCOMPLETE", 3)
     assert "PASS" in server.context[1] and "gate-" in server.context[1], server.context[1][-900:]
     assert any(c["name"] == "functional tests" and c["status"] == "FAIL" for c in report["checks"])
 
@@ -184,7 +184,7 @@ def analyzer_failures(source, env, server, policy):
         def external_write(step, request):
             if step == 0:
                 (source / "external.py").write_text(f"value = {index}\n")
-        report = trial(source, probe_env, server, external_write, "BLOCKED", 1)
+        report = trial(source, probe_env, server, external_write, "INCOMPLETE", 1)
         analyzer = next(c for c in report["checks"] if c["name"] == "dl-analyze")
         assert analyzer["status"] == "NOT VERIFIED", analyzer
         if index == 2:
@@ -193,7 +193,7 @@ def analyzer_failures(source, env, server, policy):
         profile = {"metric": "allocations", "argv": ["alloc.py"], "max": {"allocation_count": 0}}
         (source / "alloc.py").write_text("buffers = [bytearray(4096) for _ in range(1024)]\n")
         policy.write_text(json.dumps({"profile": profile, "maxCorrections": 0}))
-        report = trial(source, env, server, {}, "BLOCKED", 1)
+        report = trial(source, env, server, {}, "INCOMPLETE", 1)
         sample = next(c for c in report["checks"] if c["name"] == "trusted profile")
         assert sample["status"] == "FAIL" and sample["data"]["metrics"]["allocation_count"] > 0, sample
 
@@ -281,7 +281,7 @@ def python_hover(source, env, server, policy):
 def required_and_simple(source, env, server, policy):
     policy.write_text(json.dumps({"maxCorrections": 0}))
     report = trial(source, env, server, {0: ("bash", {"command": "echo 'enabled = True' > new_module.py"})},
-                   "AWAITING_APPROVAL", 2)
+                   "INCOMPLETE", 2)
     assert any(c["name"] == "functional verification" and c["status"] == "NOT VERIFIED" for c in report["checks"]), report["checks"]
     trace = map(json.loads, reversed(Path(env["DL_TEST_TRACE"]).read_text().splitlines()))
     session = next(row[3] for row in trace if row[:2] == ["before_agent_start", "main"])
@@ -289,7 +289,7 @@ def required_and_simple(source, env, server, policy):
     resumed = subprocess.run([PLUGIN / "omp/dl-omp", "--offline", "--resume", session, "--seconds", "20", "Finish."],
                              cwd=source, env=env, capture_output=True, text=True, timeout=25)
     verdict = json.loads(resumed.stdout)
-    assert resumed.returncode == 2 and verdict["task"] == report["task"] and verdict["state"] == "AWAITING_APPROVAL"
+    assert resumed.returncode == 2 and verdict["task"] == report["task"] and verdict["state"] == "INCOMPLETE"
     assert "new_module.py" in verdict["report"]["paths"] and server.calls == 1
     report = trial(source, env, server, {}, "VERIFIED", 1, prompt="Summarize this project.")
     assert report["checks"] == [] and report["paths"] == []
@@ -298,7 +298,7 @@ def required_and_simple(source, env, server, policy):
     assert report["route"]["scope"] == "read-only" and report["route"]["mode"] == "Standard"
     policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "maxCorrections": 0}))
     report = trial(source, env, server, {0: ("write", {"path": "unexpected.py", "content": "answer = 42\n"})},
-                   "AWAITING_APPROVAL", 2, prompt="Explain the algorithm without changing files.")
+                   "INCOMPLETE", 2, prompt="Explain the algorithm without changing files.")
     assert report["route"]["scope"] == "one file"
     assert any(c["name"] == "functional tests" and c["status"] == "PASS" for c in report["checks"])
     assert not any(c["status"] == "VERIFIED" for c in report["coverage"])
@@ -397,13 +397,13 @@ def harness_scenarios(source, env, server, policy, trace):
                    "VERIFIED", 3)
     assert "candidate" in report["paths"] and report["status"] == "PASS"
     (source / "candidate").write_text("bad\n")
-    report = trial(source, env, server, {}, "BLOCKED", 2)
+    report = trial(source, env, server, {}, "INCOMPLETE", 2)
     assert report["checks"][0]["status"] == "FAIL"
     policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."], "requireLsp": True}))
     (source / ".clangd").write_text("CompileFlags: {Add: [-Wall]}\n")
     # An opaque Bash write bypasses OMP writethrough. The gate must pull clangd diagnostics.
     report = trial(source, env, server, {0: ("bash", {"command": "echo 'int main(){return unknown;}' > main.c"})},
-                   "BLOCKED", None)
+                   "INCOMPLETE", None)
     semantic = next(c for c in report["checks"] if c["name"] == "lsp main.c")
     assert semantic.get("server") and "unknown" in semantic.get("output", ""), semantic
     assert semantic["status"] == "FAIL", semantic

@@ -67,7 +67,7 @@ def exercise(root, server):
         if language in {"Java", "Kotlin"}:
             steps = {0: ("lsp", {"action": "hover", "file": path, "line": 1, "symbol": "value", "timeout": 10}),
                      1: steps[0], 2: ("lsp", {"action": "diagnostics", "file": path, "timeout": 10})}
-        report = trial(source, env, server, steps, "BLOCKED", None)
+        report = trial(source, env, server, steps, "INCOMPLETE", None)
         diagnostic = next(row for row in report["checks"] if row["name"] == "lsp " + path)
         if language in {"Rust", "Java", "Kotlin"} and diagnostic["status"] in {"NOT VERIFIED", "INCONCLUSIVE"}:
             print(f"NOT VERIFIED {language} diagnostics — {diagnostic.get('output', diagnostic.get('reason'))}")

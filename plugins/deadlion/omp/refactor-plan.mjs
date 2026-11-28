@@ -9,7 +9,7 @@ import { executionSnapshot } from "./execution.mjs";
 const entries = value => value.split(",").map(s => s.trim().replace(/^\x60|\x60$/g, "")).filter(s => s && s !== "—");
 
 export function parsePlan(text) {
-  if (!/^Status: approved\s*$/m.test(text)) throw new Error("Refactoring plan must have Status: approved");
+  if (!/^Status: (?:active|approved)\s*$/m.test(text)) throw new Error("Refactoring plan must have Status: active");
   const steps = {};
   for (const section of text.split(/^### /m).slice(1)) {
     const [heading, ...lines] = section.split("\n");

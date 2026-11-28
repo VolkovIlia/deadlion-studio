@@ -12,6 +12,7 @@ import { testResult } from "./test-result.mjs";
 import { compatibility } from "./omp-compat.mjs";
 import { verifyMilestone } from "./refactor.mjs";
 import { chargeAnalysis, operationTimeout, timeLeft } from "./execution.mjs";
+import { importEvidence } from "./import-evidence.mjs";
 
 const semanticSource = p => supported(p) || /\.(h|hpp|tsx|jsx|mjs|cjs)$/.test(p);
 export const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/.+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
@@ -90,8 +91,7 @@ function checkProtectedInputs(task, baseline, current, paths, checks) {
   if ((task.policy.tests || task.policy.checks?.some(c => c.type === "functional")) &&
       changedTests.length && paths.some(p => !documentation(p) && !testInput.test(p)))
     checks.push({ name: "existing tests changed with production code", status: "NOT VERIFIED",
-      approval: { kind: "test-revision", paths: changedTests },
-      reason: "Approve the test revision independently before using it: " + changedTests.slice(0, 5).join(", ") });
+      reason: "Use a frozen independent oracle for production changes. Changed tests: " + changedTests.slice(0, 5).join(", ") });
   if (paths.some(p => basename(p) === ".budget" || /^\.performance\/.*\/contract\.json$/.test(p) && baseline.files[p]))
     checks.push({ name: "approved policy changed", status: "BLOCKED" });
 }
@@ -236,7 +236,7 @@ async function reviewChanges(task, { baseline, current, paths, area, source, che
   const files = await regular(task.root, paths);
   const sources = files.filter(supported);
   await checkScope(task, baseline, current, paths, files, options, checks, run);
-  if (checks.some(check => check.status === "BLOCKED" || check.approval?.kind === "test-revision")) return;
+  if (checks.some(check => check.status === "BLOCKED")) return;
   await checkSemantics(task, files, source, checks, options, probe);
   await checkAnalyzers(task, sources, options, checks);
   if (sources.length && (task.policy.semgrepConfig || task.policy.requiredAnalyzers?.includes("semgrep"))) {
@@ -253,6 +253,8 @@ async function reviewChanges(task, { baseline, current, paths, area, source, che
           coverage: { type: "functional", exact: true, paths: [path], invariants: ["identical Python AST and shebang"] } });
     }
   }
+  const imports = importEvidence(task, area, source);
+  if (imports) checks.push(imports);
   await checkRequirements(task, paths, area, checks, run);
   await verifyMilestone(task, paths, checks, options(), { baseline, current });
 }
@@ -272,11 +274,8 @@ async function checkRequirements(task, paths, area, checks, run) {
 function functionalGap(area, checks) {
   const missing = coverageFor(area, checks).filter(row => row.status === "NOT VERIFIED");
   if (!missing.length) return;
-  const declared = coverageFor(missing, checks.map(check => ({ ...check, status: "PASS" })));
-  const unapproved = declared.filter(row => row.status === "NOT VERIFIED");
   return { name: "functional verification", status: "NOT VERIFIED", missing,
-    approval: unapproved.length === missing.length ? { kind: "functional-scope", paths: unapproved.map(row => row.path) } : undefined,
-    reason: "Approve or run a scoped functional check for " +
+    reason: "Establish scoped functional evidence for " +
       missing.slice(0, 5).map(row => row.interface ? row.path + " [" + row.affectedComponents.join(", ") + "]" : row.path).join(", ") };
 }
 
@@ -389,7 +388,7 @@ async function receiptFor(task, checks, area, source, workspaceHash, started, to
   const scaling = checks.flatMap(c => (c.data?.contracts ?? [c.data]).map(scalingSummary).filter(Boolean)).slice(0, 2);
   return { receipt, receiptHash: digest(JSON.stringify(evidence)), status, paths, source, scaling,
     confirmed: checks.filter(c => c.status === "PASS").map(c => c.name), deficits: checkDeficits(failures),
-    failures: failures.map(c => ({ name:c.name, status:c.status, approval:c.approval, restartRequired:c.restartRequired,
+    failures: failures.map(c => ({ name:c.name, status:c.status, missing:c.missing?.slice(0, 8), restartRequired:c.restartRequired,
       reason:String(c.reason ?? c.output ?? c.data?.reason ?? "").slice(0, 360) })) };
 }
 
