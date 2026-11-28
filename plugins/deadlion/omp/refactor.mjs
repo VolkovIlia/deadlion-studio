@@ -10,6 +10,7 @@ import { ratchet } from "./ratchet.mjs";
 export { ratchet } from "./ratchet.mjs";
 import { archiveCampaign, checkpoint, finalReceiptStatus, optional, ownerAlive, readyMilestones, recoverReservation, reservation, state, withCampaignLock } from "./refactor-state.mjs";
 import { exhausted, executionSnapshot, migrateExecution } from "./execution.mjs";
+import { revalidateBorrowedChecks } from "./functional-receipts.mjs";
 
 import { planSource, revisePlan } from "./refactor-plan.mjs";
 export { parsePlan } from "./refactor-plan.mjs";
@@ -249,9 +250,12 @@ export async function refactorStatus(ctx, report = false, validate) {
   const evidence = final?.receipt && await read(final.receipt);
   const plan = await planSource(root, current.path);
   const { status, staleInputs } = await finalReceiptStatus(current, plan.planHash, source, final, evidence, async () => {
-    const tools = await validate(await finalRefactorTask(ctx), { timeout: 5000 });
+    const task = await finalRefactorTask(ctx);
+    const options = { timeout: 5000 };
+    const tools = await validate(task, options);
     if (evidence.toolIdentity !== digest(JSON.stringify(tools)))
       throw new Error("The final receipt predates the loaded verifier. Run /deadlion refactor verify.");
+    await revalidateBorrowedChecks(task, evidence, options, validate);
   });
   const result = join(directory, "comparison.json");
   await save(result, { status, base: baseline.baseline.base, source,

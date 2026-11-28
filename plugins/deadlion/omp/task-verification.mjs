@@ -10,6 +10,7 @@ import { advanceMission, continueAfterFailure, startMission } from "./mission.mj
 import { completeMilestone } from "./refactor.mjs";
 import { recoveryDecision } from "./recovery.mjs";
 import { prepareImportCheck } from "./import-evidence.mjs";
+import { attachFunctionalReceipt, revalidateBorrowedChecks } from "./functional-receipts.mjs";
 import { outcome } from "./task-input.mjs";
 
 export const hashTree = async task => digest(JSON.stringify(await snapshot(task.cwd)));
@@ -19,7 +20,9 @@ export async function reusableReceipt(task, report, signal) {
   try {
     const evidence = await read(report.receipt);
     if (report.receiptHash !== digest(JSON.stringify(evidence)) || report.source !== await hashTree(task)) return false;
-    const tools = await verifyToolInputs(task, { signal });
+    const options = { signal };
+    const tools = await verifyToolInputs(task, options);
+    await revalidateBorrowedChecks(task, evidence, options, verifyToolInputs);
     return !signal?.aborted && evidence.toolIdentity === digest(JSON.stringify(tools));
   } catch {
     return false;
@@ -58,10 +61,10 @@ export function registerVerifier(pi, controller) {
   const running = new WeakSet();
   pi.registerTool({
     name: "deadlion_verify", label: "Deadlion verification",
-    description: "Run engineering checks. Start a campaign with action campaign and a project-relative Markdown plan path. verify advances a passing milestone, defer selects independent work after failure, and replan adds scoped prerequisites. characterize_imports prepares a native bash check for grouping a parametrized Python import test.",
-    parameters: pi.zod.object({ action: pi.zod.enum(["verify", "campaign", "replan", "defer", "characterize_imports"]).optional(),
+    description: "Run engineering checks. import_receipt attaches scoped test evidence from another run in the same checkout and verifies the active task. Start a campaign with action campaign and a Markdown plan path. verify advances a passing milestone, defer selects independent work, replan adds prerequisites, and characterize_imports prepares a native import test check.",
+    parameters: pi.zod.object({ action: pi.zod.enum(["verify", "import_receipt", "campaign", "replan", "defer", "characterize_imports"]).optional(),
       plan: pi.zod.string().optional(), reason: pi.zod.string().optional(), path: pi.zod.string().optional(),
-      ratchet: pi.zod.string().optional() }),
+      ratchet: pi.zod.string().optional(), receipt: pi.zod.string().optional() }),
     async execute(_id, args, signal, _update, ctx) {
       if (ctx.agent.kind === "sub") throw new Error("The main session owns verification.");
       const task = await controller.taskFor(ctx);
@@ -85,15 +88,16 @@ async function runVerifier(controller, task, ctx, args, signal) {
       return result(check);
     }
     default: {
+      if (args.action === "import_receipt") attachFunctionalReceipt(task, args.receipt);
       const report = await controller.fullCheck(task, signal, ctx);
-      const { status, receipt, scaling, failures } = report;
+      const { status, receipt, scaling, failures, receiptNotes } = report;
       let next;
       if (status === "PASS" && task.refactor && task.autonomous) {
         next = await advanceVerified(controller, task, ctx, report);
       }
       const guidance = failures?.length ? "Resolve these checks and verify again, or continue independent work. " +
-        "Use native tests and a fixed oracle. For an import test grouping, use characterize_imports." : undefined;
-      return result({ status, receipt, scaling, guidance, failures: failures?.slice(0, 5), next });
+        "Use import_receipt for a passing scoped run in this checkout. Use characterize_imports for import test grouping." : undefined;
+      return result({ status, receipt, scaling, guidance, failures: failures?.slice(0, 5), receiptNotes, next });
     }
   }
 }

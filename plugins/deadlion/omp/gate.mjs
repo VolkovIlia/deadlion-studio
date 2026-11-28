@@ -13,6 +13,7 @@ import { compatibility } from "./omp-compat.mjs";
 import { verifyMilestone } from "./refactor.mjs";
 import { chargeAnalysis, operationTimeout, timeLeft } from "./execution.mjs";
 import { importEvidence } from "./import-evidence.mjs";
+import { borrowedFunctionalChecks, publishFunctionalReceipt } from "./functional-receipts.mjs";
 
 const semanticSource = p => supported(p) || /\.(h|hpp|tsx|jsx|mjs|cjs)$/.test(p);
 export const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/.+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
@@ -255,17 +256,23 @@ async function reviewChanges(task, { baseline, current, paths, area, source, che
   }
   const imports = importEvidence(task, area, source);
   if (imports) checks.push(imports);
-  await checkRequirements(task, paths, area, checks, run);
+  await checkRequirements(task, area, { source, workspaceHash: current.fingerprint, checks, run, options });
   await verifyMilestone(task, paths, checks, options(), { baseline, current });
 }
 
-async function checkRequirements(task, paths, area, checks, run) {
-  const code = paths.some(p => !documentation(p));
-  if (!code && (task.route?.readOnly || task.route?.intent === "documentation")) return;
+async function checkRequirements(task, area, { source, workspaceHash, checks, run, options }) {
+  const paths = area.map(row => row.path);
+  const code = paths.filter(p => !documentation(p));
+  if (!code.length && (task.route?.readOnly || task.route?.intent === "documentation")) return;
   await approvedCommands(task, checks, run, area);
   const performance = await checkContracts(task, paths, checks, run);
   if (task.designIssue) checks.push({ name: "design", status: "BLOCKED", reason: task.designIssue });
-  const gap = functionalGap(area, checks);
+  let gap = functionalGap(area, checks);
+  if (gap) {
+    const scope = { source, workspaceHash, testOnly: code.every(path => testInput.test(path)) };
+    checks.push(...await borrowedFunctionalChecks(task, gap.missing, scope, options, verifyToolInputs));
+    gap = functionalGap(area, checks);
+  }
   if (gap) checks.push(gap);
   if (task.mode !== "Standard" && performance === "NOT APPLICABLE")
     checks.push({ name: "approved experimental contract", status: "NOT VERIFIED" });
@@ -384,10 +391,13 @@ async function receiptFor(task, checks, area, source, workspaceHash, started, to
     integration: { baseline: task.tools.integration, verified: tools?.integration },
     coverage: coverageFor(area, checks), diagnostics: gateFindings(checks, task.root),
     elapsedMs: Date.now() - started };
+  const receiptHash = digest(JSON.stringify(evidence));
   await save(receipt, evidence);
+  await publishFunctionalReceipt(task, evidence, receipt, receiptHash);
   const scaling = checks.flatMap(c => (c.data?.contracts ?? [c.data]).map(scalingSummary).filter(Boolean)).slice(0, 2);
-  return { receipt, receiptHash: digest(JSON.stringify(evidence)), status, paths, source, scaling,
+  return { receipt, receiptHash, status, paths, source, scaling,
     confirmed: checks.filter(c => c.status === "PASS").map(c => c.name), deficits: checkDeficits(failures),
+    receiptNotes: checks.filter(c => c.name === "functional receipt unavailable").map(c => c.reason),
     failures: failures.map(c => ({ name:c.name, status:c.status, missing:c.missing?.slice(0, 8), restartRequired:c.restartRequired,
       reason:String(c.reason ?? c.output ?? c.data?.reason ?? "").slice(0, 360) })) };
 }

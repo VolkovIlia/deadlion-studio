@@ -84,8 +84,10 @@ export function recoveryDecision(task, report) {
 
 export function recoveryMessage(task, record) {
   const goal = task.goal ? ` Goal: ${task.goal.slice(0, 240)}.` : "";
+  const receipts = task.last.failures?.some(check => check.missing?.length) ?
+    " If an independent scoped run already passed here, attach its receipt with deadlion_verify action import_receipt." : "";
   return `Deadlion ${task.last.status} · ${record.cause} · ${record.strategy}. ${record.reason.slice(0, 250)}. ` +
-    guidance[record.strategy] + goal + (record.receipt ? " Receipt: " + record.receipt : "");
+    guidance[record.strategy] + receipts + goal + (record.receipt ? " Receipt: " + record.receipt : "");
 }
 
 export function advisory(message) {

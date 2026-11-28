@@ -10,6 +10,7 @@ import tempfile
 import threading
 
 from omp_engineering_smoke import PLUGIN, Transport, fixture, trial
+from omp_receipt_smoke import transfer
 from omp_refactoring_smoke import prepare
 from omp_stability_smoke import environment, write
 
@@ -403,3 +404,7 @@ if __name__ == "__main__":
             with tempfile.TemporaryDirectory(prefix="slopzero-") as temporary:
                 run(Path(temporary), transport)
                 print("PASSED", name)
+        for case in ("automatic", "explicit", "stale-input", "stale-source", "unrelated", "local-failure"):
+            with tempfile.TemporaryDirectory(prefix="deadlion-receipt-") as temporary:
+                transfer(Path(temporary), transport, case)
+                print("PASSED receipt", case)

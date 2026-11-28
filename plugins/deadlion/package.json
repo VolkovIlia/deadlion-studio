@@ -1,6 +1,6 @@
 {
   "name": "deadlion-studio",
-  "version": "4.6.5",
+  "version": "4.6.6",
   "private": true,
   "description": "Deadlion engineering checks for Oh My Pi",
   "omp": { "extensions": ["./omp/performance.mjs"] }

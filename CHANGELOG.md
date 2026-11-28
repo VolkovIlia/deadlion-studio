@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.6] - 2026-11-28
+
+- Apply qualifying functional evidence from an independent OMP run to the active task when its checkout fingerprint, pinned inputs and approved test scope match. Preserve the active task's baseline, policy and remaining gates.
+- Let the agent attach an older receipt through `deadlion_verify` with `action: "import_receipt"`. Live scripted OMP tests cover transfer, stale inputs, source changes, unrelated scopes and a failing local check. [OMP receipt reuse](docs/omp-recovery.md#scoped-test-evidence-from-another-omp-run)
+
 ## [4.6.5] - 2026-11-28
 
 - Return verification failures to the OMP agent through native advisory continuation. Resume legacy approval waits with the original task and baseline. Keep explicit budgets and final receipt checks.
@@ -90,7 +95,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.5...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.6...HEAD
+[4.6.6]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.6
 [4.6.5]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.5
 [4.6.4]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4
 [4.6.3]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.3
