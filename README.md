@@ -8,7 +8,7 @@ Deadlion Studio provides an engineering workflow for OMP, Claude Code and Codex.
 The core plugin takes a project from design to release. Its performance tools
 compare implementations against a fixed workload, correctness oracle and resource budget.
 
-**Deadlion Studio 4.6.6** reuses qualifying scoped test evidence from independent OMP runs and returns unresolved checks to the agent. [Release downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.6) · [OMP recovery and migration](docs/omp-recovery.md)
+**Deadlion Studio 4.6.7** returns unresolved checks to the OMP agent and uses fresh native diagnostics to resolve a recorded LSP failure in the current checkout. [Release downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.7) · [OMP recovery and migration](docs/omp-recovery.md)
 
 `dl-perf scale` measures how runtime, memory and operation counts change across input sizes and distributions. It reports which growth models fit the measured range and where the evidence cannot distinguish between them.
 
@@ -41,7 +41,7 @@ omp plugin install --scope user deadlion@deadlion-studio
 omp plugin list
 ```
 
-Look for `deadlion@deadlion-studio (4.6.6) (user)` under Marketplace Plugins. For an existing Marketplace install, run the following from the target project and restart OMP when the upgrade finishes.
+Look for `deadlion@deadlion-studio (4.6.7) (user)` under Marketplace Plugins. For an existing Marketplace install, run the following from the target project and restart OMP when the upgrade finishes.
 
 ```sh
 omp plugin marketplace update deadlion-studio &&

@@ -21,6 +21,32 @@ def checks_for(path, length):
     ]}
 
 
+def lsp_recovery(root, server, edit_after_diagnostics=False):
+    source, env = environment(root, server)
+    file = "module.py"
+    (source / "pyrightconfig.json").write_text('{"typeCheckingMode":"basic"}')
+    (source / ".omp").mkdir()
+    (source / ".omp/lsp.json").write_text(json.dumps({"servers": {
+        name: {"disabled": True} for name in ("basedpyright", "pylsp", "ruff", "ty")
+    }}))
+    policy = root / "policy.json"
+    policy.write_text(json.dumps({"checks": [checks_for(file, 1)]}))
+    env["DL_ENGINEERING_POLICY"] = str(policy)
+    inspect = ("lsp", {"action": "diagnostics", "file": file})
+    steps = {0: write(file, 'value: int = "wrong"\n'), 1: inspect,
+             4: write(file, "value: int = 2\n"), 5: inspect, 6: ("deadlion_verify", {})}
+    if edit_after_diagnostics:
+        steps[7] = ("bash", {"command": 'printf \'value: int = "wrong again"\\n\' > module.py'})
+    expected = "INCOMPLETE" if edit_after_diagnostics else "VERIFIED"
+    report = trial(source, env, server, steps, expected, None)
+    assert "reportAssignmentType" in server.context[2], server.context[2][-2500:]
+    assert "DECOMPOSE" in server.context[4], server.context[4][-2500:]
+    tool = next(msg for msg in reversed(json.loads(server.context[7])) if msg["role"] == "tool")
+    assert json.loads(tool["content"])["status"] == "PASS", tool
+    check, = [item for item in report["checks"] if item["name"] == "lsp " + file]
+    assert check["status"] == ("NOT VERIFIED" if edit_after_diagnostics else "PASS"), check
+
+
 def productive(root, server):
     source, env = environment(root, server)
     policy = root / "policy.json"
@@ -408,3 +434,7 @@ if __name__ == "__main__":
             with tempfile.TemporaryDirectory(prefix="deadlion-receipt-") as temporary:
                 transfer(Path(temporary), transport, case)
                 print("PASSED receipt", case)
+        for edit_after_diagnostics in (False, True):
+            with tempfile.TemporaryDirectory(prefix="deadlion-lsp-recovery-") as temporary:
+                lsp_recovery(Path(temporary), transport, edit_after_diagnostics)
+                print("PASSED LSP recovery", "stale snapshot" if edit_after_diagnostics else "fresh diagnostics")

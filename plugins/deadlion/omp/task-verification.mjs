@@ -13,7 +13,7 @@ import { prepareImportCheck } from "./import-evidence.mjs";
 import { attachFunctionalReceipt, revalidateBorrowedChecks } from "./functional-receipts.mjs";
 import { outcome } from "./task-input.mjs";
 
-export const hashTree = async task => digest(JSON.stringify(await snapshot(task.cwd)));
+export const hashTree = async (task, options) => digest(JSON.stringify(await snapshot(task.cwd, options)));
 
 export async function reusableReceipt(task, report, signal) {
   if (!report || task.refactor || task.policy.semgrepConfig || signal?.aborted) return false;

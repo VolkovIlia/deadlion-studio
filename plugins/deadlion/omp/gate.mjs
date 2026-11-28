@@ -1,7 +1,7 @@
 import { join, basename, dirname, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
-import { activeForFile } from "./lsp.mjs";
+import { activeForFile, mergeDiagnostic } from "./lsp.mjs";
 import { checkSemgrep } from "./semgrep.mjs";
 import { execute } from "./process.mjs";
 import { approvalHash, changes, digest, integrationFingerprint, inventory, limits, read, samePython, save, scripts, snapshot, stateHome } from "./evidence.mjs";
@@ -27,21 +27,27 @@ async function checkSemantics(task, files, source, checks, options, probe) {
   for (const file of files.filter(semanticSource)) {
     const p = relative(task.root, file);
     let item = task.semantic?.[p];
-    const required = task.policy.requireLsp || item?.status === "FAIL";
+    const required = task.policy.requireLsp || item?.required || item?.status === "FAIL";
     const active = probe && !required && await activeForFile(task.cwd, file).catch(() => false);
-    if (item?.sourceHash !== source && (required || active) && probe) {
-      try {
-        const timeout = AbortSignal.timeout(Math.max(1, Math.min(5000, options().timeout)));
-        const { signal } = options();
-        item = await probe(task.cwd, file, signal ? AbortSignal.any([signal, timeout]) : timeout);
-        item.sourceHash = source;
-      } catch (error) {
-        item = { status: "NOT VERIFIED", sourceHash: source, reason: error.message };
-      }
-    }
+    if (probe && (required || active) && (item?.sourceHash !== source || item.status === "FAIL"))
+      item = await probeSemantic(task, { file, p, item, source, probe, ...options() });
     if (item?.sourceHash === source) checks.push({ name: "lsp " + p, ...item,
       status: semanticStatus(item, required), coverage: { type: "semantic", paths: [p] } });
-    else if (required) checks.push({ name: "lsp " + p, status: "NOT VERIFIED" });
+    else if (required) checks.push({ name: "lsp " + p, status: "NOT VERIFIED",
+      reason: "Run native LSP diagnostics for this checkout snapshot with the required server and verify again." });
+  }
+}
+
+async function probeSemantic(task, { file, p, item, source, probe, timeout, signal }) {
+  try {
+    const budget = AbortSignal.timeout(Math.max(1, Math.min(5000, timeout)));
+    const report = await probe(task.cwd, file, signal ? AbortSignal.any([signal, budget]) : budget);
+    if (!report) return item;
+    const observed = mergeDiagnostic(item, { ...report, sourceHash: source });
+    if (report.status === "FAIL") (task.semantic ??= {})[p] = observed;
+    return observed;
+  } catch (error) {
+    return { status: "NOT VERIFIED", sourceHash: source, reason: error.message };
   }
 }
 

@@ -1,6 +1,37 @@
 // OMP 19.2.1 version-specific bridge. Load lazily so CLI and Node consumers
 // can run without an OMP package installation.
 import { lspObservation } from "./diagnostics.mjs";
+import { relative, resolve } from "node:path";
+
+export const diagnosticRequest = event =>
+  event.toolName === "lsp" && event.input?.action === "diagnostics" && typeof event.input.file === "string";
+
+export function mergeDiagnostic(previous, report) {
+  const servers = report.server?.split(/,\s*/) ?? [];
+  const prior = previous?.requiredServers ?? (previous?.status === "FAIL" ? previous.server?.split(/,\s*/) ?? [] : []);
+  const required = previous?.required || previous?.status === "FAIL";
+  if (report.status === "FAIL") return { ...report, required: true, requiredServers: [...new Set([...prior, ...servers])] };
+  if (!report.sourceHash || required && (!servers.length ||
+      !["PASS", "WARNING"].includes(report.status) || !prior.every(server => servers.includes(server))))
+    return previous;
+  return { ...report, required, requiredServers: prior };
+}
+
+export async function observedDiagnostic(task, event, pending, snapshot) {
+  const report = lspObservation(event);
+  if (!report) return;
+  const source = pending?.task === task.id && pending.file === report.file && pending.source;
+  return { ...report, sourceHash: source && source === await snapshot() ? source : undefined };
+}
+
+export function saveDiagnostic(task, cwd, report) {
+  const file = relative(task.root, resolve(cwd, report.file));
+  const previous = task.semantic?.[file];
+  const current = mergeDiagnostic(previous, report);
+  if (current === previous) return false;
+  (task.semantic ??= {})[file] = current;
+  return true;
+}
 
 async function sessionTool(cwd) {
   const { LspTool } = await import("@oh-my-pi/pi-coding-agent/lsp");

@@ -86,8 +86,10 @@ export function recoveryMessage(task, record) {
   const goal = task.goal ? ` Goal: ${task.goal.slice(0, 240)}.` : "";
   const receipts = task.last.failures?.some(check => check.missing?.length) ?
     " If an independent scoped run already passed here, attach its receipt with deadlion_verify action import_receipt." : "";
+  const lsp = task.last.failures?.find(check => check.name.startsWith("lsp "));
+  const semantic = lsp ? ` Run native lsp action diagnostics for ${lsp.name.slice(4)}, resolve any errors and run deadlion_verify in this session.` : "";
   return `Deadlion ${task.last.status} · ${record.cause} · ${record.strategy}. ${record.reason.slice(0, 250)}. ` +
-    guidance[record.strategy] + receipts + goal + (record.receipt ? " Receipt: " + record.receipt : "");
+    guidance[record.strategy] + semantic + receipts + goal + (record.receipt ? " Receipt: " + record.receipt : "");
 }
 
 export function advisory(message) {

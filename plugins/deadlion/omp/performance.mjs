@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { commands } from "./commands.mjs";
-import { join, relative, resolve } from "node:path";
+import { join } from "node:path";
 import { incremental, openTask, persist, read, restoreTask, resumeTask, save, stateHome } from "./evidence.mjs";
-import { editPaths, feedback, lspObservation } from "./diagnostics.mjs";
-import { diagnostics, hover } from "./lsp.mjs";
+import { editPaths, feedback } from "./diagnostics.mjs";
+import { diagnosticRequest, diagnostics, hover, observedDiagnostic, saveDiagnostic } from "./lsp.mjs";
 import { design, permitsDesignTool } from "./design.mjs";
 import { semgrepResult } from "./semgrep.mjs";
 import { verify, verifyToolInputs } from "./gate.mjs";
@@ -16,8 +16,7 @@ import { advisory, recoveryDecision, recoveryMessage } from "./recovery.mjs";
 import { advanceMission, commitMission, continueAfterFailure } from "./mission.mjs";
 import { hashTree, measureBaseline, registerVerifier, reusableReceipt } from "./task-verification.mjs";
 import { captureImportCheck, startImportCheck } from "./import-evidence.mjs";
-// Factories are rebound by OMP. Use a shared lookup only for unambiguous
-// parent identities in this process. The main gate always checks disk again.
+// Across OMP factory instances, share only unambiguous parent identities.
 const owners = new Map();
 const delegates = new WeakMap();
 function locateParent(ctx) {
@@ -267,6 +266,10 @@ class EngineeringSession {
     await startImportCheck(task, event, ctx);
     if (task.semgrepTools?.includes(event.toolName))
       this.pendingLsp.set(event.toolCallId, { task: task.id, source: await hashTree(task) });
+    if (ctx.agent?.kind !== "sub" && diagnosticRequest(event)) {
+      const source = await this.diagnosticSnapshot(task, ctx);
+      if (source) this.pendingLsp.set(event.toolCallId, { task: task.id, source, file: event.input.file });
+    }
   }
 
   async before_subagent_spawn(event, ctx) {
@@ -321,13 +324,8 @@ class EngineeringSession {
       if (item.diagnostics && path) {
         const evidence = { file: path, ...item.diagnostics };
         await save(join(task.directory, "lsp-" + randomUUID() + ".json"), evidence);
-        if (!sub) {
-          task.semantic ??= {};
-          const file = relative(task.root, resolve(ctx.cwd, path));
-          if (!task.semantic[file] || item.diagnostics.errored) task.semantic[file] =
-            { status: item.diagnostics.errored ? "FAIL" : "INCONCLUSIVE", server: item.diagnostics.server, output: item.diagnostics.messages, source: "omp:writethrough" };
-          await persist(task);
-        }
+        if (!sub && item.diagnostics.errored) await this.recordDiagnostic(task, ctx,
+          { ...evidence, status: "FAIL", output: item.diagnostics.messages, source: "omp:writethrough" });
       }
     }
   }
@@ -450,17 +448,19 @@ class EngineeringSession {
         await persist(task);
       }
     }
-    const info = lspObservation(event);
-    if (info) {
-      const file = relative(task.root, resolve(ctx.cwd, info.file));
-      task.semantic ??= {};
-      // Tool diagnostics describe an observation. The gate obtains fresh native
-      // diagnostics for required sources or known failures.
-      if (task.semantic[file]?.status !== "FAIL" || info.status === "FAIL") task.semantic[file] = info;
-      await persist(task);
-    }
+    const report = await observedDiagnostic(task, event, pending, () => this.diagnosticSnapshot(task, ctx));
+    if (report) await this.recordDiagnostic(task, ctx, report);
   }
 
+  diagnosticSnapshot(task, ctx) {
+    return hashTree(task, { timeout: Math.min(3000, timeLeft(task)), signal: this.signal(ctx) }).catch(() => undefined);
+  }
+
+  async recordDiagnostic(task, ctx, report) {
+    if (!saveDiagnostic(task, ctx.cwd, report)) return;
+    this.verified.delete(task.id);
+    await persist(task);
+  }
   async correction(task, event, ctx) {
     const canContinue = !event.signal?.aborted && !exhausted(task);
     if (canContinue && task.last.failures?.some(check => check.restartRequired)) {
@@ -468,8 +468,9 @@ class EngineeringSession {
       return outcome(task, ctx);
     }
     const recovery = recoveryDecision(task, task.last);
+    const semantic = task.last.failures?.some(check => check.name.startsWith("lsp "));
     if (!canContinue || task.corrections >= limit(task.maxCorrections) ||
-        recovery.repeatedState || recovery.cycle || recovery.strategy === "DEFER") {
+        (recovery.repeatedState && !semantic) || recovery.cycle || recovery.strategy === "DEFER") {
       task.state = event.signal?.aborted ? "CANCELLED" : "INCOMPLETE";
       const next = canContinue && await continueAfterFailure(this, task, ctx, recovery.reason);
       await outcome(task, ctx);

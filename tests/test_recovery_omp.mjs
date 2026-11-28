@@ -2,7 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { exhausted, executionLimits, migrateExecution, updateBudget } from "../plugins/deadlion/omp/execution.mjs";
 import { recoveryDecision } from "../plugins/deadlion/omp/recovery.mjs";
+import { mergeDiagnostic, observedDiagnostic } from "../plugins/deadlion/omp/lsp.mjs";
 import { parsePlan, validateTechnicalRevision } from "../plugins/deadlion/omp/refactor-plan.mjs";
+
+test("clearing a semantic failure requires a complete observation from the required server on one snapshot", async () => {
+  const failed = mergeDiagnostic(undefined, { status: "FAIL", server: "pyright" });
+  const report = { toolName: "lsp", input: { action: "diagnostics", file: "module.py" },
+    content: [{ type: "text", text: "OK" }], details: { serverName: "pyright", success: true } };
+  const pending = { task: "task", source: "original", file: report.input.file };
+  const task = { id: pending.task };
+  const raced = await observedDiagnostic(task, report, pending, async () => "changed");
+  assert.equal(mergeDiagnostic(failed, raced), failed);
+
+  const complete = await observedDiagnostic(task, report, pending, async () => "original");
+  assert.equal(mergeDiagnostic(failed, { ...complete, server: "ruff" }), failed);
+  assert.equal(mergeDiagnostic(failed, { ...complete, status: "INCONCLUSIVE" }), failed);
+  const accepted = mergeDiagnostic(failed, complete);
+  assert.equal(accepted.status, "PASS");
+  assert.equal(accepted.sourceHash, "original");
+  assert.deepEqual(accepted.requiredServers, ["pyright"]);
+  assert.equal(accepted.required, true);
+});
 
 test("migration removes implicit limits and operator adjustments preserve evidence", () => {
   const original = { id: "task", started: 100, policy: { seconds: 2 }, deadline: 2100, analysisMs: 120000,

@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.7] - 2026-11-28
+
+- Resolve a recorded LSP failure with complete native diagnostics from the required server for the current checkout fingerprint. A later edit invalidates the evidence and a different server cannot clear the failure.
+- Give the OMP agent the available alternative recovery strategy after an unchanged LSP failure. Semantic recovery includes the affected path and the native diagnostic action. [LSP recovery in OMP](docs/omp-recovery.md#recovering-from-an-lsp-failure)
+
 ## [4.6.6] - 2026-11-28
 
 - Apply qualifying functional evidence from an independent OMP run to the active task when its checkout fingerprint, pinned inputs and approved test scope match. Preserve the active task's baseline, policy and remaining gates.
@@ -95,7 +100,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.6...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.7...HEAD
+[4.6.7]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.7
 [4.6.6]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.6
 [4.6.5]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.5
 [4.6.4]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.4
