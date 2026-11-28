@@ -57,7 +57,7 @@ jobs:
 
   live-omp:
     name: Live OMP ${{ matrix.version }} / ${{ matrix.scenario }}
-    runs-on: ubuntu-26.04
+    runs-on: ${{ (matrix.scenario == 'autoresearch_smoke' || matrix.scenario == 'engineering_evolution') && 'ubuntu-22.04' || 'ubuntu-26.04' }}
     timeout-minutes: 12
     strategy:
       fail-fast: false
@@ -117,14 +117,8 @@ jobs:
                 bwrap --unshare-all --cap-drop ALL --ro-bind / / --proc /proc --dev /dev -- /usr/bin/true
             }
             if ! nested_isolation; then
-              # The hosted image may restrict nested user namespaces with AppArmor.
-              if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-                sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-              fi
-              if ! nested_isolation; then
-                echo "UNSUPPORTED — nested Linux isolation unavailable" | tee -a "$GITHUB_STEP_SUMMARY"
-                exit 1
-              fi
+              echo "UNSUPPORTED — nested Linux isolation unavailable" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
           fi
           run_test() {
