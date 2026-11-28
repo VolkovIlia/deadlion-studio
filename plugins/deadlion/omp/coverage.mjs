@@ -10,21 +10,22 @@ export const scopeList = paths => Array.isArray(paths) && paths.length > 0 && pa
   p !== ".." && !p.startsWith("../") && posix.normalize(p) === p);
 
 export const componentManifest = /^(Cargo\.toml|package\.json|go\.mod|pyproject\.toml|pom\.xml|build\.gradle(?:\.kts)?|Makefile)$/;
+const buildBoundary = /^(?:settings\.gradle(?:\.kts)?|CMakeLists\.txt|meson\.build|Cargo\.lock|go\.sum|package-lock\.json|pnpm-lock\.yaml|uv\.lock|gradle\.properties)$/;
 const publicBoundary = /(?:^|\/)(?:contracts|migrations|schemas|include|interfaces)\/|\.(proto|graphqls?|h|hpp)$/i;
 
 export function changedArea(paths, records) {
   const roots = new Set(Object.keys(records).filter(p => componentManifest.test(basename(p))).map(dirname));
-  const componentOf = path => {
-    let folder = dirname(path);
-    while (folder !== "." && !roots.has(folder)) folder = dirname(folder);
-    return folder;
-  };
-  return paths.map(path => {
-    const component = componentOf(path);
-    const shared = publicBoundary.test(path) || componentManifest.test(basename(path));
-    return { path, component, interface: shared ? path : undefined,
-      affectedComponents: shared ? [...new Set([component, ...roots])].sort() : [component] };
-  });
+  const allRoots = [...roots].sort();
+  return paths.map(path => changeScope(path, roots, allRoots));
+}
+
+function changeScope(path, roots, allRoots) {
+  let component = dirname(path);
+  while (component !== "." && !roots.has(component)) component = dirname(component);
+  const name = basename(path);
+  const shared = publicBoundary.test(path) || componentManifest.test(name) || buildBoundary.test(name);
+  return { path, component, interface: shared ? path : undefined,
+    affectedComponents: shared && allRoots.length ? allRoots : [component] };
 }
 
 export function contractCoverage(spec, cwd, root, workload) {

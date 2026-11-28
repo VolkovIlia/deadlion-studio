@@ -15,7 +15,8 @@ NAMES = ("omp", "python3", "ruff", "ast-grep", "semgrep", "clangd", "clang-tidy"
 MANIFESTS = {"Cargo.toml", "package.json", "go.mod", "pyproject.toml", "pom.xml",
              "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "Makefile",
              "requirements.txt", "pytest.ini", "setup.cfg", "gradlew"}
-CONFIG = MANIFESTS | {"Cargo.lock", "go.sum", "package-lock.json", "pnpm-lock.yaml", "uv.lock",
+LSP_CONFIG = {prefix + "lsp." + suffix for prefix in ("", ".") for suffix in ("json", "yml", "yaml")}
+CONFIG = MANIFESTS | LSP_CONFIG | {"Cargo.lock", "go.sum", "package-lock.json", "pnpm-lock.yaml", "uv.lock",
                       "ruff.toml", ".ruff.toml", ".clang-tidy", "compile_commands.json",
                       "detekt.yml", "detekt.yaml", "tsconfig.json", ".eslintrc", ".gitattributes",
                       "gradle-wrapper.properties", "gradle.properties", ".gitignore"}
@@ -47,15 +48,15 @@ def inventory(venv, root=None):
 def approval_inputs(policy):
     inputs = {}
     root = Path.cwd()
-    commands = [policy.get("tests"), (policy.get("profile") or {}).get("argv")]
-    commands.extend(step["argv"] for step in policy.get("checks", []))
-    for argv in commands:
+    commands = [(policy.get("tests"), root), ((policy.get("profile") or {}).get("argv"), root)]
+    commands.extend((step["argv"], root / step.get("cwd", ".")) for step in policy.get("checks", []))
+    for argv, cwd in commands:
         if not argv:
             continue
-        command = shutil.which(argv[0])
+        command = shutil.which(str(cwd / argv[0])) if "/" in argv[0] else shutil.which(argv[0])
         paths = [Path(p) for p in argv[1:] if os.path.isabs(p) and not Path(p).is_relative_to(root)]
         if len(argv) > 1 and Path(argv[0]).name in {"python", "python3", "node", "bash", "sh", "ruby"} and not argv[1].startswith("-"):
-            paths.append(root / argv[1])
+            paths.append(cwd / argv[1])
         if command:
             paths.append(Path(command).absolute())
         for path in paths:
@@ -64,6 +65,16 @@ def approval_inputs(policy):
     db = os.getenv("DL_COMPILE_COMMANDS")
     if db:
         inputs[db] = hashlib.sha256(Path(db).read_bytes()).hexdigest()
+    config_roots = [root / name for name in (".", ".omp", ".pi", ".claude")]
+    config_roots.extend(Path.home() / name for name in (".", ".omp/agent", ".pi/agent", ".claude"))
+    if profile := os.getenv("PI_CODING_AGENT_DIR"):
+        config_roots.append(Path(profile))
+    configs = {folder / name for folder in config_roots for name in LSP_CONFIG}
+    configs.update(root / name for name in ("compile_commands.json", "build/compile_commands.json"))
+    for path in sorted(configs):
+        if path.is_file():
+            with path.open("rb") as handle:
+                inputs[str(path)] = hashlib.file_digest(handle, "sha256").hexdigest()
     for name in policy.get("verificationInputs", []):
         path = root / name
         if path.resolve() != path or not path.exists():
@@ -99,7 +110,7 @@ def test_command(root, paths, manifests):
     if "Cargo.toml" in manifests:
         return ["cargo", "test", "--workspace", "--offline"]
     if "go.mod" in manifests:
-        return ["go", "test", "./..."]
+        return ["go", "test", "-count=1", "-json", "./..."]
     if "package.json" in manifests and json.loads((root / "package.json").read_bytes()).get("scripts", {}).get("test"):
         return ["npm", "test"]
     if "gradlew" in manifests:
@@ -122,19 +133,42 @@ def discover():
             with item.open("rb") as handle:
                 approved[str(path)] = hashlib.file_digest(handle, "sha256").hexdigest()
     manifests = [p for p in approved if Path(p).name in MANIFESTS]
-    tests = test_command(root, names, manifests)
+    suites = discover_tests(root, paths, manifests)
+    tests = next((suite["argv"] for suite in suites if suite["cwd"] == "."), None)
     tools = [name for name, info in inventory(".venv", root).items() if info["status"] == "installed"]
     policy = {"trustProject": True, "native": True, "verificationInputs": list(approved)} if approved else {
         "trustProject": True, "native": True}
     if tests:
-        policy.update(tests=tests, testsScope=["."])
-    fingerprint = hashlib.sha256(json.dumps([str(root), policy, approved], sort_keys=True).encode()).hexdigest()
+        policy["tests"] = tests
+    fingerprint = hashlib.sha256(json.dumps([str(root), policy, approved, suites], sort_keys=True).encode()).hexdigest()
     return dict(root=str(root), git=git, dirty=dirty, manifests=manifests, tools=tools, policy=policy,
                 languages=sorted({LANGUAGES[p.suffix] for p in paths if p.suffix in LANGUAGES}),
-                components=sorted({str(Path(p).parent) for p in manifests}), fingerprint=fingerprint,
+                components=sorted({str(Path(p).parent) for p in manifests}), fingerprint=fingerprint, suites=suites,
                 benchmarks=[p for p in names if "benchmark" in p or "/benches/" in p][:40],
                 contracts=[p for p in approved if p.startswith(".performance/") and p.endswith("/contract.json")],
                 generated=[p for p in names if "generated" in p.split("/")][:40])
+
+
+def discover_tests(root, paths, manifests):
+    by_directory = {}
+    python_tests = set()
+    for name in manifests:
+        path = Path(name)
+        by_directory.setdefault(path.parent, []).append(path.name)
+    directories = set(by_directory)
+    directories.add(Path("."))
+    for path in paths:
+        if path.suffix == ".py" and path.name.startswith("test_"):
+            python_tests.add(next((parent for parent in path.parents if parent in directories), Path(".")))
+    suites = []
+    for directory in sorted(directories):
+        markers = by_directory.get(directory, [])
+        command = test_command(root / directory, ["test_fixture.py"] if directory in python_tests else [], markers)
+        if command:
+            suites.append(dict(id=str(len(suites) + 1), argv=command, cwd=str(directory),
+                               proposedScope=[str(directory)] if directory != Path(".") else [],
+                               reason=", ".join(markers) or "Python test filenames"))
+    return suites
 
 
 if __name__ == "__main__":

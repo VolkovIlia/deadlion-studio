@@ -3,6 +3,7 @@
 The package targets Fedora Linux, OMP 19.2.1 and Python 3.11+. The implementation starts from Deadlion 4.4.0 at `21d817529b25c55d3ecdcec9b80c1ca80024ea20`. Upstream tag `v19.2.1` resolves to `b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac`. A version match identifies the tested release. Runtime coverage depends on the active tools and project. [OMP source](https://github.com/can1357/oh-my-pi/tree/b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac) · [4.4.0 evidence](scaling-verification.md)
 
 For the 4.6.0 policy format, setup and compatibility matrix, see the [4.6.0 OMP guide](omp-4.6.md).
+For current scoped test approval, campaign recovery and migration, see the [4.6.1 stabilization report](omp-4.6.1.md).
 
 ## Architecture and capability changes
 

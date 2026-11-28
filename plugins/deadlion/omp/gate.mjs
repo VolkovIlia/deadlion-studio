@@ -1,17 +1,19 @@
 import { join, basename, dirname, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { activeForFile } from "./lsp.mjs";
 import { checkSemgrep } from "./semgrep.mjs";
 import { execute } from "./process.mjs";
-import { approvalHash, changes, digest, inventory, limits, read, samePython, save, scripts, snapshot } from "./evidence.mjs";
+import { approvalHash, changes, digest, inventory, limits, read, samePython, save, scripts, snapshot, stateHome } from "./evidence.mjs";
+import { projectPolicy } from "./setup.mjs";
 import { analyze, gateFindings, regular, scalingSummary, supported } from "./diagnostics.mjs";
 import { changedArea, contains, contractCoverage, coverageFor, documentation } from "./coverage.mjs";
+import { testResult } from "./test-result.mjs";
 import { compatibility } from "./omp-compat.mjs";
 import { verifyMilestone } from "./refactor.mjs";
 
 const semanticSource = p => supported(p) || /\.(h|hpp|tsx|jsx|mjs|cjs)$/.test(p);
-const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/[^/]+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
+const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/.+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
 
 function semanticStatus(item, required) {
   return !required && ["NOT VERIFIED", "INCONCLUSIVE"].includes(item.status) ? "WARNING" : item.status;
@@ -47,10 +49,7 @@ async function checkScope(task, baseline, current, paths, files, options, checks
   }
   checkProtectedInputs(task, baseline, paths, checks);
   // A test of the working tree cannot certify different bytes staged for commit.
-  if (current.git && paths.some(p => JSON.stringify(current.files[p]?.[0]) !== JSON.stringify(baseline.files[p]?.[0]))) {
-    const mismatch = await execute(["git", "diff", "--quiet", "--", ...paths], options());
-    if (mismatch.code !== 0) checks.push({ name: "index differs from tested files", status: "NOT VERIFIED" });
-  }
+  if (current.git && paths.length) await checkIndex(baseline, current, paths, checks, options);
   if (task.refactor || task.refactorFinal) return;
   await checkSize(task, files, checks, run);
   const budgets = Object.keys(current.files).filter(p => basename(p) === ".budget");
@@ -61,14 +60,32 @@ async function checkScope(task, baseline, current, paths, files, options, checks
   }
 }
 
+async function checkIndex(baseline, current, paths, checks, options) {
+  const staged = await execute(["git", "diff", "--cached", "--name-only", "-z"], options());
+  if (staged.code) throw new Error("Could not inspect staged paths");
+  const index = new Set(staged.stdout.split("\0"));
+  const changed = paths.filter(path => index.has(path) ||
+    JSON.stringify(current.files[path]?.[0]) !== JSON.stringify(baseline.files[path]?.[0]));
+  if (!changed.length) return;
+  const worktree = await execute(["git", "diff", "--name-only", "-z"], options());
+  if (worktree.code) throw new Error("Could not inspect worktree and index agreement");
+  const dirty = new Set(worktree.stdout.split("\0"));
+  const mismatch = changed.filter(path => dirty.has(path));
+  if (mismatch.length) checks.push({ name: "index differs from tested files", status: "NOT VERIFIED", reason: mismatch.slice(0, 5).join(", ") });
+}
+
 function checkProtectedInputs(task, baseline, paths, checks) {
   const protectedPaths = [...task.policy.protectedPaths ?? [], ...task.policy.verificationInputs ?? []];
   const modifiedInputs = paths.filter(p => protectedPaths.some(name => contains(name, p)));
   if (modifiedInputs.length)
     checks.push({ name: "approved verification inputs changed", status: "BLOCKED",
       reason: modifiedInputs.join(", "), coverage: { type: "verification-input", paths: modifiedInputs } });
+  else if (protectedPaths.length)
+    checks.push({ name: "protected verification inputs", status: "PASS",
+      coverage: { type: "verification-input", paths: protectedPaths } });
   const changedTests = paths.filter(p => testInput.test(p) && (baseline.files[p] || /(?:conftest\.py|pytest\.ini)$/.test(p)));
-  if (task.policy.tests && changedTests.length && paths.some(p => !documentation(p) && !testInput.test(p)))
+  if ((task.policy.tests || task.policy.checks?.some(c => c.type === "functional")) &&
+      changedTests.length && paths.some(p => !documentation(p) && !testInput.test(p)))
     checks.push({ name: "existing tests changed with production code", status: "BLOCKED",
       reason: "Approve the test revision independently before using it: " + changedTests.slice(0, 5).join(", ") });
   if (paths.some(p => basename(p) === ".budget" || /^\.performance\/.*\/contract\.json$/.test(p) && baseline.files[p]))
@@ -139,9 +156,9 @@ async function checkContracts(task, paths, checks, run) {
     if (performance === "PASS" && checks.at(-1).data.status === "VERIFIED")
       checks.push({ name: "approved workload oracle", status: "PASS", coverage: { ...coverage, type: "oracle",
         invariants: [contract.benchmark.oracle?.kind ?? "exact"] } });
-  } else if (task.base && paths.length) {
+  } else if (projectContracts(task, paths)) {
     performance = await run("approved contracts", [join(scripts, "dl-perf-gate"), "--changed"], true,
-      { ...process.env, DL_PERF_BASE: task.base, DL_PERF_PROJECT_SCOPE: paths.some(p => !documentation(p)) ? "1" : "0" });
+      { ...process.env, DL_PERF_BASE: task.base, DL_PERF_PROJECT_SCOPE: task.baselineCapture || paths.some(p => !documentation(p)) ? "1" : "0" });
     for (const report of checks.at(-1).data.contracts ?? []) {
       if (report.status !== "VERIFIED" || !report.scope) continue;
       const { contract, candidate_root, workload } = report.scope;
@@ -150,6 +167,10 @@ async function checkContracts(task, paths, checks, run) {
     }
   }
   return performance;
+}
+
+function projectContracts(task, paths) {
+  return task.base && (paths.length || task.baselineCapture);
 }
 
 export async function verify(task, signal, budget = 20000, probe) {
@@ -224,7 +245,7 @@ async function reviewChanges(task, { baseline, current, paths, area, source, che
     }
   }
   await checkRequirements(task, paths, area, checks, run);
-  await verifyMilestone(task, paths, checks, options());
+  await verifyMilestone(task, paths, checks, options(), { baseline, current });
 }
 
 async function checkRequirements(task, paths, area, checks, run) {
@@ -252,16 +273,30 @@ async function approvedCommands(task, checks, run) {
   }
   if (task.policy.tests) {
     await run("functional tests", task.policy.tests, false);
-    checks.at(-1).coverage = { type: "functional", paths: task.policy.testsScope ?? [] };
+    bindTestEvidence(checks.at(-1), task.policy.tests, task.policy.testsScope ?? []);
   }
   for (const step of task.policy.checks ?? []) {
-    await run("plan: " + step.name, step.argv, false);
-    checks.at(-1).coverage = { type: step.type ?? "policy", paths: step.scope ?? [] };
+    const cwd = resolve(task.root, step.cwd ?? ".");
+    if (await realpath(cwd) !== cwd) throw new Error("Approved test directory changed");
+    await run("plan: " + step.name, step.argv, false, process.env, cwd);
+    const result = checks.at(-1);
+    if (step.type === "functional") bindTestEvidence(result, step.argv, step.scope ?? [], step.requireTestCount);
+    else result.coverage = { type: step.type ?? "policy", paths: step.scope ?? [], argv: step.argv };
   }
 }
 
-async function record(checks, options, name, argv, json, env = process.env) {
-  const result = await execute(argv, { ...options(), env });
+function bindTestEvidence(check, argv, paths, requireCount) {
+  const stats = testResult(argv, check.data.stdout + "\n" + check.data.stderr, requireCount);
+  check.coverage = { type: "functional", paths, argv, execution: stats };
+  if (check.status === "PASS" && (stats.incomplete || stats.passed === 0)) {
+    check.status = "NOT VERIFIED";
+    check.reason = "No complete nonempty test run was observed";
+  }
+}
+
+async function record(checks, options, name, argv, json, env = process.env, cwd) {
+  const execution = options();
+  const result = await execute(argv, { ...execution, env, cwd: cwd ?? execution.cwd });
   let status = result.code === 0 ? "PASS" : result.code === 1 ? "FAIL" : "NOT VERIFIED";
   const data = json ? JSON.parse(result.stdout) : result;
   if (json) status = ({ VERIFIED: "PASS", MEASURED: "PASS", ERROR: "FAIL", "PERFORMANCE REGRESSION": "FAIL" })[data.status] ?? data.status;
@@ -277,6 +312,9 @@ export async function verifyToolInputs(task, options) {
   if (task.approved && task.approvalHash !== await approvalHash(task, options)) throw new Error("approved fixtures changed");
   if (task.policyFile && task.policyHash !== digest(await readFile(task.policyFile)))
     throw new Error("operator policy changed");
+  if (!task.policyFile && (task.policy.testsScope || task.policy.setupApproval &&
+      task.policy.setupApproval !== (await projectPolicy(task.root, stateHome(), options)).setupApproval))
+    throw new Error("Project setup or approved test scope changed. Review /deadlion setup and start a new task.");
   if (task.policy.semgrepConfig && task.semgrepConfigHash !== digest(await readFile(task.policy.semgrepConfig)))
     throw new Error("Semgrep configuration changed");
 }

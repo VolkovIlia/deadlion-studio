@@ -76,7 +76,7 @@ def interactive(source, env, server):
 
 
 def policy_scenarios(source, env, server, policy):
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."]}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."]}))
     initial = fixture.git(source, "rev-parse", "HEAD")
     command = "echo one > a.txt & echo two > b.txt & wait; git add a.txt b.txt; git -c user.email=a@b -c user.name=a commit -qm change"
     report = trial(source, env, server, {0: ("bash", {"command": command})}, "VERIFIED", 2)
@@ -92,13 +92,13 @@ def policy_scenarios(source, env, server, policy):
     policy.write_text(json.dumps({"tests": ["missing-deadlion-check"]}))
     report = trial(source, env, server, {}, "BLOCKED", 1)
     assert report["status"] == "NOT VERIFIED", report
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."]}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."]}))
 
 
 def approved_checks(source, env, server, policy):
     rule = "This generated table exceeds the file guideline; the resource and functional gates still apply."
     plan = {"name": "generated table present", "argv": ["/usr/bin/test", "-s", "table.py"]}
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."], "checks": [plan], "maxCorrections": 0,
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."], "checks": [plan], "maxCorrections": 0,
                                  "sizeExceptions": {"table.py": rule}, "requiredAnalyzers": ["ruff", "ast-grep"]}))
     opts = {**env, "DL_MAX_FILE": "1"}
     steps = {0: ("write", {"path": "table.py", "content": "first = 1\nsecond = 2\nthird = 3\n"})}
@@ -153,7 +153,7 @@ def contract_scenarios(source, env, server, policy):
 def incremental_scenarios(source, env, server, policy):
     target = source / "loops.py"
     target.write_text("pass\n")
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."]}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."]}))
     report = trial(source, env, server, {
         0: ("write", {"path": "loops.py", "content": "table = {'a': 1}\nfor k, v in table.items():\n    print(v)\n"}),
         1: ("write", {"path": "loops.py", "content": "table = {'a': 1}\nfor v in table.values():\n    print(v)\n"}),
@@ -174,7 +174,7 @@ def analyzer_failures(source, env, server, policy):
     bin_dir.mkdir()
     (bin_dir / "omp").symlink_to(shutil.which("omp"))
     probe_env = {**env, "PATH": f"{bin_dir}:/usr/bin:/bin"}
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."], "maxCorrections": 0,
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."], "maxCorrections": 0,
                                  "requiredAnalyzers": ["ruff"], "analysisSeconds": 2}))
     ruff = bin_dir / "ruff"
     for index, body in enumerate([None, "exit 2", "sleep 10"]):
@@ -236,7 +236,7 @@ def child_steps(step, request):
 
 
 def parallel_eval(source, env, server, policy, trace):
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."]}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."]}))
     sent = set()
     start = len(trace.read_text().splitlines())
     def steps(step, request):
@@ -266,7 +266,7 @@ def python_hover(source, env, server, policy):
     config = source / ".omp/lsp.json"
     config.parent.mkdir(exist_ok=True)
     config.write_text(json.dumps({"servers": {"pyright": {"disabled": True}, "basedpyright": {"disabled": True}}}))
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."], "requireLsp": True, "maxCorrections": 0}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."], "requireLsp": True, "maxCorrections": 0}))
     code = ("def copies(values: list[int]) -> list[list[int]]:\n    result = []\n"
             "    for _ in range(4):\n        result.append(values.copy())\n    return result\n")
     report = trial(source, {**env, "PYTHONUSERBASE": site.getuserbase()}, server,
@@ -282,7 +282,7 @@ def required_and_simple(source, env, server, policy):
     policy.write_text(json.dumps({"maxCorrections": 0}))
     report = trial(source, env, server, {0: ("bash", {"command": "echo 'enabled = True' > new_module.py"})},
                    "BLOCKED", 2)
-    assert any(c["name"] == "functional verification" and c["status"] == "NOT VERIFIED" for c in report["checks"])
+    assert any(c["name"] == "functional verification" and c["status"] == "NOT VERIFIED" for c in report["checks"]), report["checks"]
     trace = map(json.loads, reversed(Path(env["DL_TEST_TRACE"]).read_text().splitlines()))
     session = next(row[3] for row in trace if row[:2] == ["before_agent_start", "main"])
     server.steps, server.calls = {}, 0
@@ -296,7 +296,7 @@ def required_and_simple(source, env, server, policy):
     policy.write_text(json.dumps({"tests": ["/usr/bin/false"], "maxCorrections": 0}))
     report = trial(source, env, server, {}, "VERIFIED", 1, prompt="Explain the algorithm without changing files.")
     assert report["route"]["scope"] == "read-only" and report["route"]["mode"] == "Standard"
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "maxCorrections": 0}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "maxCorrections": 0}))
     report = trial(source, env, server, {0: ("write", {"path": "unexpected.py", "content": "answer = 42\n"})},
                    "BLOCKED", 2, prompt="Explain the algorithm without changing files.")
     assert report["route"]["scope"] == "one file"
@@ -399,7 +399,7 @@ def harness_scenarios(source, env, server, policy, trace):
     (source / "candidate").write_text("bad\n")
     report = trial(source, env, server, {}, "BLOCKED", 2)
     assert report["checks"][0]["status"] == "FAIL"
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."], "requireLsp": True}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."], "requireLsp": True}))
     (source / ".clangd").write_text("CompileFlags: {Add: [-Wall]}\n")
     # An opaque Bash write bypasses OMP writethrough. The gate must pull clangd diagnostics.
     report = trial(source, env, server, {0: ("bash", {"command": "echo 'int main(){return unknown;}' > main.c"})},
@@ -408,7 +408,7 @@ def harness_scenarios(source, env, server, policy, trace):
     assert semantic.get("server") and "unknown" in semantic.get("output", ""), semantic
     assert semantic["status"] == "FAIL", semantic
     print("semantic error", semantic["server"], flush=True)
-    policy.write_text(json.dumps({"tests": ["/usr/bin/true"], "testsScope": ["."]}))
+    policy.write_text(json.dumps({"tests": ["python3", "-c", "from pathlib import Path; assert Path('candidate').is_file()"], "testsScope": ["."]}))
     report = trial(source, env, server, child_steps, "VERIFIED", None)
     assert "child.txt" in report["paths"] and server.calls < 12, [m[-500:] for m in server.context[-4:]]
     assert "unix-design" in server.context[0]

@@ -97,14 +97,19 @@ export function lspObservation(event) {
   if (event.toolName !== "lsp" || event.input?.action !== "diagnostics" || !event.input.file) return;
   const output = event.content.filter(c => c.type === "text").map(c => c.text).join("\n");
   const server = event.details?.serverName;
-  const clean = server && event.details?.success && output.trim() === "OK";
-  const summary = output.split("\n", 1)[0];
-  const reported = server && event.details?.success;
-  const errors = reported && /\b[1-9]\d* errors?\b/.test(summary);
-  const warnings = reported && /\d+ (warnings?|info|hints?)\b/.test(summary) &&
-    !/unreported|still pending|some servers failed|no fresh report/i.test(output);
+  const status = server && event.details?.success ? semanticVerdict(server, event.input.file, output) : "INCONCLUSIVE";
   return { source: "omp:lsp", file: event.input.file, server, output,
-    status: clean ? "PASS" : errors ? "FAIL" : warnings ? "WARNING" : "INCONCLUSIVE" };
+    status, reason: status === "INCONCLUSIVE" ? "Complete fresh diagnostics are unconfirmed" : undefined };
+}
+
+function semanticVerdict(server, file, output) {
+  const summary = output.split("\n", 1)[0];
+  if (/\b[1-9]\d* errors?\b/.test(summary)) return "FAIL";
+  if (file.endsWith(".rs") && /\brust-analyzer\b/.test(server)) return "INCONCLUSIVE";
+  if (output.trim() === "OK") return "PASS";
+  if (/\d+ (warnings?|info|hints?)\b/.test(summary) &&
+      !/unreported|still pending|some servers failed|no (?:fresh|diagnostics) report/i.test(output)) return "WARNING";
+  return "INCONCLUSIVE";
 }
 
 export function gateFindings(checks, root) {

@@ -62,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [engineering_smoke, engineering_evolution, autoresearch_smoke, refactoring_smoke, lsp_matrix]
+        scenario: [engineering_smoke, engineering_evolution, autoresearch_smoke, refactoring_smoke, stability_smoke, lsp_matrix]
         include:
           - version: 19.2.1
             sha256: e8b937f9bf023baa147bdd300ad5421af0a6ef8b1f350c47a9a93d5fca94feca
@@ -153,9 +153,11 @@ jobs:
           fi
           if [ "$SCENARIO" = lsp_matrix ]; then
             export DL_REQUIRE_LSP_MATRIX=1
-            echo "NOT VERIFIED — Rust, Go, Java and Kotlin language servers" >> "$GITHUB_STEP_SUMMARY"
+            run_test | tee "$RUNNER_TEMP/deadlion-lsp.log"
+            sed -n '/^PASSED /p; /^NOT VERIFIED /p' "$RUNNER_TEMP/deadlion-lsp.log" >> "$GITHUB_STEP_SUMMARY"
+          else
+            run_test
           fi
-          run_test
           if [ "$SCENARIO" = autoresearch_smoke ]; then run_test --contracts; fi
 
   fedora-core:

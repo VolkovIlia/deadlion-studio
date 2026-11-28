@@ -25,12 +25,23 @@ export async function checkSemgrep(task, files, source, options) {
     return { name, status: "NOT VERIFIED", reason: "The configured MCP scan does not attest a pinned CLI rule file" };
   if (!data && !available && config && task.policy.native === true) {
     const result = await execute(["semgrep", "scan", "--metrics=off", "--disable-version-check",
-      "--json", "--config", config, "--", ...files], options);
+      "--json", "--time", "--config", config, "--", ...files], options);
     if (result.code) return { name, status: "NOT VERIFIED", reason: result.stderr.slice(-400) };
     data = JSON.parse(result.stdout);
   }
   if (!data) return { name, status: "NOT VERIFIED", reason: "Semgrep scan with matching source and file coverage required" };
-  const scanned = new Set(data.paths?.scanned?.map(p => resolve(task.root, p)));
-  const complete = !data.errors?.length && files.every(p => scanned.has(p));
-  return { name, status: !complete ? "NOT VERIFIED" : data.results.length ? "WARNING" : "PASS", data };
+  const complete = confirmsRules(task.root, data, files);
+  return { name, status: !complete ? "NOT VERIFIED" : data.results.length ? "WARNING" : "PASS",
+    reason: complete ? undefined : "Applicable rules were not confirmed for every requested source file", data };
+}
+
+function confirmsRules(root, data, files) {
+  if (!files.length || !Array.isArray(data.errors) || data.errors.length) return false;
+  const scanned = new Set(data.paths?.scanned?.map(p => resolve(root, p)));
+  const applied = new Set(data.results.filter(item => item.path && item.check_id).map(item => resolve(root, item.path)));
+  for (const target of data.time?.targets ?? []) {
+    if (target.path && target.match_times?.some((seconds, i) => seconds > 0 && data.time.rules?.[i]))
+      applied.add(resolve(root, target.path));
+  }
+  return files.every(path => scanned.has(path) && applied.has(path));
 }

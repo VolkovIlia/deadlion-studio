@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.1] - 2026-11-28
+
+- Require explicit approval of the functional scope for discovered tests. Empty and partially skipped suites no longer certify a change.
+- Recover interrupted refactoring milestones, record approved plan revisions and archive campaigns with their receipts. Required plan constraints must resolve to executable gates.
+- Preserve structural history across unambiguous function moves and renames. Block inconclusive measurements and worktree/index mismatches.
+- Exercise native Go, Rust and Java diagnostics with scripted OMP. Remove the two whole-workspace snapshots from advisory LSP calls. [Migration and verification report](docs/omp-4.6.1.md)
+
 ## [4.6.0] - 2026-11-28
 
 - Verification receipts bind functional coverage and workload oracles to the applicable paths. An unresolved coverage gap prevents acceptance.
@@ -61,7 +68,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.0...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.1...HEAD
+[4.6.1]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.1
 [4.6.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.0
 [4.5.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.5.0
 [4.3.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.3.0

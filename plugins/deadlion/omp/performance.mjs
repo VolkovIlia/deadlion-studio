@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { commands } from "./commands.mjs";
 import { join, relative, resolve } from "node:path";
 import { execute } from "./process.mjs";
-import { approvalHash, digest, incremental, openTask, persist, read, restoreTask, resumeTask, save, scripts, snapshot } from "./evidence.mjs";
+import { approvalHash, digest, incremental, openTask, persist, read, restoreTask, resumeTask, save, scripts, snapshot, stateHome } from "./evidence.mjs";
 import { editPaths, feedback, lspObservation, scalingSummary } from "./diagnostics.mjs";
 import { diagnostics, hover } from "./lsp.mjs";
 import { design, permitsDesignTool } from "./design.mjs";
@@ -10,10 +10,12 @@ import { semgrepResult } from "./semgrep.mjs";
 import { verify, verifyToolInputs } from "./gate.mjs";
 import { lifecycleContext } from "./omp-compat.mjs";
 import { authorizeRefactorTool, bindMilestone, completeMilestone, milestonePrompt, refactorCommand } from "./refactor.mjs";
+import { activateMilestone, loadReservedTask, parkMilestone } from "./refactor-state.mjs";
 
 // Factories are rebound by OMP. Use a shared lookup only for unambiguous
 // parent identities in this process. The main gate always checks disk again.
 const owners = new Map();
+const delegates = new WeakMap();
 function locateParent(ctx) {
   const matches = [...owners.values()].filter(o => o.agent === ctx.agent.parentId && (o.cwd === ctx.cwd || o.task.refactor));
   return matches.length === 1 ? matches[0].task : undefined;
@@ -47,7 +49,6 @@ class EngineeringSession {
   seen = new Map();
   active = new Map();
   selections = new Map();
-  delegates = new Map();
   session(ctx) { return ctx.sessionManager?.getSessionId() ?? ctx.cwd; }
 
   async taskFor(ctx, prompt = "", newRequest = false, existingOnly = false) {
@@ -79,23 +80,37 @@ class EngineeringSession {
   }
 
   async loadTask(ctx, { prior, selection, newRequest, existingOnly, prompt }) {
+    const transition = selection?.split(" ", 1)[0];
+    if (transition === "recover") {
+      const id = selection.slice(8);
+      const directory = join(stateHome(), id);
+      const task = await loadReservedTask(ctx, directory, id);
+      resumeTask(task, "resume");
+      await activateMilestone(ctx, task);
+      this.pi.appendEntry?.(entry, { directory, id });
+      return task;
+    }
     const task = await prior ?? await restoreTask(ctx, entry);
     if (existingOnly) return task;
-    const milestone = selection?.startsWith("milestone ") ? selection.slice(10) : undefined;
+    const milestone = transition === "milestone" ? selection.slice(10) : undefined;
     if (!task || milestone || selection === "new" || newRequest && task.state === "VERIFIED") {
       if (task?.refactor && !terminal.has(task.state))
         throw new Error("Stop or finish the active refactoring milestone before starting another task");
       if (task) this.release(ctx, task);
-      const created = await openTask(ctx, prompt);
-      if (milestone) {
-        created.refactor = await bindMilestone(ctx, milestone, created);
-        await persist(created);
-      }
-      this.pi.appendEntry?.(entry, { directory: created.directory, id: created.id });
-      return created;
+      return this.createTask(ctx, prompt, milestone);
     }
     if (newRequest && terminal.has(task.state)) resumeTask(task, selection);
     return task;
+  }
+
+  async createTask(ctx, prompt, milestone) {
+    const created = await openTask(ctx, prompt);
+    if (milestone) {
+      created.refactor = await bindMilestone(ctx, milestone, created);
+      await persist(created);
+    }
+    this.pi.appendEntry?.(entry, { directory: created.directory, id: created.id });
+    return created;
   }
   release(ctx, task) {
     const key = this.session(ctx);
@@ -108,20 +123,20 @@ class EngineeringSession {
     this.lastScan.delete(task.id);
     this.verified.delete(task.id);
     this.seen.delete(task.id);
-    this.delegates.delete(task.id);
+    delegates.delete(task);
     for (const [id, pending] of this.pendingLsp) if (pending.task === task.id) this.pendingLsp.delete(id);
   }
 
   async transition(command, ctx) {
     const key = this.session(ctx);
-    const task = await this.taskFor(ctx, "", false, true);
     if (command === "refactor" || command.startsWith("refactor ")) {
       const check = async task => {
         task.enforcement = lifecycleContext(this.pi, ctx);
-        return verify(task, this.signal(ctx), 20000, this.semanticProbe(task));
+        return verify(task, this.signal(ctx), task.analysisMs, this.semanticProbe(task));
       };
-      return refactorCommand(command, ctx, check, value => this.select(key, value));
+      return refactorCommand(command, ctx, check, value => this.select(key, value), verifyToolInputs);
     }
+    const task = await this.taskFor(ctx, "", false, true);
     if (command === "stop") {
       if (task && !terminal.has(task.state)) {
         task.state = "INCOMPLETE";
@@ -129,6 +144,7 @@ class EngineeringSession {
         this.release(ctx, task);
         ctx.abort?.();
         await outcome(task, ctx);
+        await parkMilestone(task);
       }
       return "Engineering task stopped.";
     }
@@ -193,7 +209,10 @@ class EngineeringSession {
   async before_agent_start(event, ctx) {
     if (ctx.agent?.kind === "sub") return;
     let task;
-    try { task = await this.taskFor(ctx, event.prompt, true); }
+    try {
+      task = await this.taskFor(ctx, event.prompt, true);
+      if (task.refactor) await activateMilestone(ctx, task);
+    }
     catch (error) {
       ctx.ui?.notify(error.message, "error");
       if (process.env.DL_VERDICT_FILE) await save(process.env.DL_VERDICT_FILE,
@@ -234,14 +253,14 @@ class EngineeringSession {
     catch (error) { return { block: true, reason: "Deadlion initialization failed: " + error.message }; }
     if (!task) return;
     if (task.refactor) {
-      const reason = authorizeRefactorTool(task, event, ctx, editPaths(event));
+      const reason = await authorizeRefactorTool(task, event, ctx, editPaths(event));
       if (reason) return { block: true, reason };
     }
     if (event.toolName === "lsp" && !this.semanticProbe(task) && event.input?.action !== "status")
       return { block: true, reason: "Approve project-native language servers with /deadlion setup." };
     if (task.designIssue && !await permitsDesignTool(event, ctx))
       return { block: true, reason: task.designIssue };
-    if (event.toolName === "lsp" && event.input?.action === "diagnostics" || task.semgrepTools?.includes(event.toolName))
+    if (task.semgrepTools?.includes(event.toolName))
       this.pendingLsp.set(event.toolCallId, { task: task.id, source: await hashTree(task) });
   }
 
@@ -249,8 +268,8 @@ class EngineeringSession {
     const task = ctx.agent?.kind === "sub" ? locateParent(ctx) : await this.taskFor(ctx, "", false, true);
     if (!task?.refactor) return;
     const scopes = task.refactor.step.owners;
-    if (!this.delegates.has(task.id)) this.delegates.set(task.id, new Set());
-    const delegated = this.delegates.get(task.id);
+    if (!delegates.has(task)) delegates.set(task, new Set());
+    const delegated = delegates.get(task);
     if (ctx.agent?.kind === "sub" || !Object.hasOwn(scopes, event.agent) || delegated.has(event.agent))
       return { block: true, reason: "Milestone requires a unique subagent with an assigned scope" };
     delegated.add(event.agent);
@@ -296,7 +315,8 @@ class EngineeringSession {
         await save(join(task.directory, "lsp-" + randomUUID() + ".json"), evidence);
         if (!sub) {
           task.semantic ??= {};
-          task.semantic[relative(task.root, resolve(ctx.cwd, path))] =
+          const file = relative(task.root, resolve(ctx.cwd, path));
+          if (!task.semantic[file] || item.diagnostics.errored) task.semantic[file] =
             { status: item.diagnostics.errored ? "FAIL" : "INCONCLUSIVE", server: item.diagnostics.server, output: item.diagnostics.messages, source: "omp:writethrough" };
           await persist(task);
         }
@@ -330,7 +350,12 @@ class EngineeringSession {
   }
 
   async agent_end(event, ctx) {
-    if (ctx.agent?.kind === "sub" || event.willContinue) return;
+    if (event.willContinue) return;
+    if (ctx.agent?.kind === "sub") {
+      const parent = locateParent(ctx);
+      if (parent) delegates.get(parent)?.delete(ctx.agent.name);
+      return;
+    }
     const task = await this.tasks.get(this.session(ctx));
     const last = event.messages?.filter(m => m.role === "assistant").at(-1);
     if (!task || terminal.has(task.state) || !["aborted","error"].includes(last?.stopReason)) return;
@@ -344,6 +369,7 @@ class EngineeringSession {
     this.release(ctx, task);
     this.tasks.delete(key);
     this.selections.delete(key);
+    await parkMilestone(task);
     if (task && !terminal.has(task.state)) await persist(task);
   }
 
@@ -378,7 +404,10 @@ class EngineeringSession {
       await this.failStop(task, ctx, event, error);
       ctx.abort?.();
     } finally {
-      if (task && terminal.has(task.state)) this.release(ctx, task);
+      if (task && terminal.has(task.state)) {
+        this.release(ctx, task);
+        await parkMilestone(task);
+      }
     }
   }
 
@@ -396,7 +425,7 @@ class EngineeringSession {
   async finalEvidence(task, signal) {
     const previous = this.verified.get(task.id);
     this.verified.delete(task.id);
-    if (previous && !signal?.aborted && !task.policy.semgrepConfig && Date.now() < task.deadline &&
+    if (!task.refactor && previous && !signal?.aborted && !task.policy.semgrepConfig && Date.now() < task.deadline &&
         previous.source === await hashTree(task) &&
         previous.receiptHash === digest(JSON.stringify(await read(previous.receipt)))) {
       await verifyToolInputs(task, { signal });
@@ -408,8 +437,7 @@ class EngineeringSession {
   async collectSemantic(task, event, ctx) {
     const pending = this.pendingLsp.get(event.toolCallId);
     this.pendingLsp.delete(event.toolCallId);
-    if (pending?.task !== task.id) return;
-    if (task.semgrepTools?.includes(event.toolName)) {
+    if (pending?.task === task.id && task.semgrepTools?.includes(event.toolName)) {
       const data = semgrepResult(event);
       const { source } = pending;
       if (data && source === await hashTree(task)) {
@@ -419,13 +447,12 @@ class EngineeringSession {
     }
     const info = lspObservation(event);
     if (info) {
-      const sourceHash = await hashTree(task);
       const file = relative(task.root, resolve(ctx.cwd, info.file));
-      if (pending.source === sourceHash) {
-        task.semantic ??= {};
-        task.semantic[file] = { ...info, sourceHash };
-        await persist(task);
-      }
+      task.semantic ??= {};
+      // Tool diagnostics describe an observation. The gate obtains fresh native
+      // diagnostics for required sources or known failures.
+      if (task.semantic[file]?.status !== "FAIL" || info.status === "FAIL") task.semantic[file] = info;
+      await persist(task);
     }
   }
 

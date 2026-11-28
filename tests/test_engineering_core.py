@@ -81,3 +81,17 @@ def test_compilation_database_matches_translation_unit(tmp_path, monkeypatch):
     assert native.project_for(file) == ("clang-tidy", None)
     db.write_text(json.dumps([dict(file=file.name, directory=str(tmp_path))]))
     assert native.project_for(file) == ("clang-tidy", (db.parent, db.name))
+
+
+@pytest.mark.skipif(not shutil.which("detekt"), reason="Detekt unavailable")
+def test_kotlin_detekt_reports_temporary_primitive_wrapper(tmp_path):
+    (tmp_path / "detekt.yml").write_text(
+        "performance:\n  active: true\n  UnnecessaryTemporaryInstantiation:\n    active: true\n"
+    )
+    source = tmp_path / "Fixture.kt"
+    source.write_text("fun text(): String = Integer(1).toString()\n")
+    native = load(ROOT / "plugins/deadlion/skills/performance/scripts/native_diagnostics.py")
+    findings = list(native.review([source], {}))
+    assert [(item["file"], item["line"], item["rule"]) for item in findings] == [
+        (str(source), 1, "detekt.performance.UnnecessaryTemporaryInstantiation")
+    ]

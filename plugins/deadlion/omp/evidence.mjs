@@ -94,9 +94,7 @@ export async function openTask(ctx, prompt) {
   const directory = join(stateHome(), id);
   const policyFile = process.env.DL_ENGINEERING_POLICY && resolve(ctx.cwd, process.env.DL_ENGINEERING_POLICY);
   const approvedPolicy = policyFile && await readFile(policyFile);
-  const policy = approvedPolicy ? JSON.parse(approvedPolicy) : await projectPolicy(baseline.root, stateHome());
-  if (policy.trustProject === true && !policy.tests)
-    policy.tests = (await discover(baseline.root)).policy.tests;
+  const policy = await selectPolicy(baseline.root, approvedPolicy);
   const integer = (name, fallback, min) => {
     const value = policy[name] ?? fallback;
     if (!Number.isSafeInteger(value) || value < min) throw new Error("invalid policy " + name);
@@ -128,6 +126,14 @@ export async function openTask(ctx, prompt) {
   await freezeWorkloads(task);
   await persist(task);
   return task;
+}
+
+async function selectPolicy(root, approvedPolicy) {
+  if (!approvedPolicy) return projectPolicy(root, stateHome());
+  const policy = JSON.parse(approvedPolicy);
+  if (policy.trustProject === true && !policy.tests && !policy.checks?.length)
+    policy.tests = (await discover(root)).policy.tests;
+  return policy;
 }
 
 export async function approvalHash(task, options) {
@@ -197,6 +203,10 @@ function validateCoveragePolicy(policy) {
     throw new Error("testsScope requires tests and normalized project-relative paths");
   if (policy.checks?.some(c => c.scope !== undefined && !scopeList(c.scope)))
     throw new Error("check scope requires normalized project-relative paths");
+  if (policy.checks?.some(c => c.cwd !== undefined && !scopeList([c.cwd])))
+    throw new Error("check cwd requires a normalized project-relative path");
+  if (policy.checks && new Set(policy.checks.map(c => c.name)).size !== policy.checks.length)
+    throw new Error("check names must be unique");
   for (const name of ["verificationInputs", "performancePaths"])
     if (policy[name] !== undefined && !scopeList(policy[name]))
       throw new Error(name + " requires normalized project-relative paths");
