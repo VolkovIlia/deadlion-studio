@@ -32,6 +32,8 @@ class Transport(BaseHTTPRequestHandler):
         index = self.server.calls
         if interactive:
             self.server.calls += 1
+            if index in (2, 5) and os.environ.get("DL_TEST_TRACE_ISOLATION"):
+                print("Candidate shell result", json.dumps(request["messages"][-1])[-2000:], flush=True)
         if interactive and index < len(CALLS):
             name, args = CALLS[index]
             if name=="run_experiment" and self.server.contracts:

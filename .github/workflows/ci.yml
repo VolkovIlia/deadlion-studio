@@ -102,6 +102,7 @@ jobs:
       - name: Run native harness with scripted transport
         env:
           SCENARIO: ${{ matrix.scenario }}
+          DL_TEST_TRACE_ISOLATION: '1'
         run: |
           set -euo pipefail
           if ! systemd-run --user --wait --collect /usr/bin/true ||
@@ -132,7 +133,7 @@ jobs:
     runs-on: ubuntu-24.04
     container: fedora:44
     steps:
-      - run: dnf -y install git python3 python3-pip gcc make groff tar gzip
+      - run: dnf -y install git python3 python3-pip gcc make groff tar gzip diffutils
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
