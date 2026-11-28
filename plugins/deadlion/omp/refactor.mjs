@@ -9,7 +9,7 @@ import { discover } from "./setup.mjs";
 import { ratchet } from "./ratchet.mjs";
 export { ratchet } from "./ratchet.mjs";
 import { archiveCampaign, checkpoint, finalReceiptStatus, optional, ownerAlive, readyMilestones, recoverReservation, reservation, state, withCampaignLock } from "./refactor-state.mjs";
-import { exhausted, executionSnapshot, migrateExecution } from "./execution.mjs";
+import { chargeAnalysis, exhausted, executionSnapshot, migrateExecution, operationTimeout, timeLeft } from "./execution.mjs";
 import { revalidateBorrowedChecks } from "./functional-receipts.mjs";
 
 import { planSource, revisePlan } from "./refactor-plan.mjs";
@@ -22,6 +22,24 @@ export async function structuralMetrics(root, options = {}) {
   return JSON.parse(result.stdout);
 }
 
+function ensureStructuralBudget(task, signal, now = Date.now()) {
+  if (signal?.aborted) throw new Error("CANCELLED");
+  const reason = exhausted(task, now);
+  if (reason) throw new Error(reason);
+}
+
+function structuralOptions(task, signal, now = Date.now()) {
+  ensureStructuralBudget(task, signal, now);
+  return { signal, timeout: Math.min(operationTimeout(task), timeLeft(task, now)) };
+}
+
+async function captureStructure(task, signal) {
+  const started = Date.now();
+  const options = structuralOptions(task, signal, started);
+  try { return await structuralMetrics(task.root, options); }
+  finally { chargeAnalysis(task, started); }
+}
+
 export async function activeRefactor(cwd) {
   const where = await execute(["git", "rev-parse", "--show-toplevel"], { cwd, timeout: 2000 });
   if (where.code) throw new Error("Refactoring requires a Git worktree");
@@ -31,12 +49,12 @@ export async function activeRefactor(cwd) {
   return { root, directory, current };
 }
 
-export async function startRefactor(ctx, plan, task, receipt, autonomous = false) {
+export async function startRefactor(ctx, plan, task, receipt, autonomous = false, signal) {
   const { root, directory, current } = await activeRefactor(ctx.cwd);
   if (current) throw new Error("A refactoring baseline already exists. See /deadlion refactor report.");
   const spec = await planSource(root, plan);
   const { baseline, source, checkout, checkpointHash } = await initialCheckpoint(task, root, spec.path, autonomous);
-  const structure = await structuralMetrics(root);
+  const structure = await captureStructure(task, signal).catch(async error => { await persist(task); throw error; });
   const architecture = await discover(root);
   const patch = await execute(["git", "diff", "--no-ext-diff", "--binary", baseline.base, "--"], { cwd: root, maxBytes: 32 << 20 });
   if (patch.code || digest(JSON.stringify(await snapshot(root))) !== checkpointHash)
@@ -50,6 +68,7 @@ export async function startRefactor(ctx, plan, task, receipt, autonomous = false
     if (await optional(state(directory))) throw new Error("A campaign is already present");
     if (digest(JSON.stringify(await snapshot(root))) !== checkpointHash)
       throw new Error("The original checkout changed before baseline acceptance");
+    ensureStructuralBudget(task, signal);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await save(join(directory, "global.json"), { source, baseline, structure, architecture, receipt,
       baselineStatus, measurements: measurementChecks(baselineEvidence),
@@ -76,7 +95,7 @@ async function initialCheckpoint(task, root, plan, autonomous) {
   return { baseline, source, checkout, checkpointHash };
 }
 
-export async function bindMilestone(ctx, id, task) {
+export async function bindMilestone(ctx, id, task, signal) {
   const { current, root, directory } = await activeRefactor(ctx.cwd);
   if (!current || !Object.hasOwn(current.steps, id)) throw new Error("Unknown milestone " + id);
   const spec = await planSource(root, current.path);
@@ -89,7 +108,6 @@ export async function bindMilestone(ctx, id, task) {
   const origin = await read(join(global.baselineTask, "task.json"));
   if (origin.policyHash !== task.policyHash || JSON.stringify(origin.policy) !== JSON.stringify(task.policy))
     throw new Error("Campaign engineering policy changed");
-  const structure = await structuralMetrics(root);
   const missing = unresolvedConstraints(step, task);
   if (missing.length) throw new Error("Milestone constraints NOT VERIFIED: " + missing.join(", "));
   return withCampaignLock(directory, async () => {
@@ -99,11 +117,12 @@ export async function bindMilestone(ctx, id, task) {
     if (latest.results[id] || !step.depends.every(dep => latest.results[dep]))
       throw new Error("Milestone or prerequisite state changed");
     if (await optional(reservation(directory))) throw new Error("A milestone is reserved. Resume or recover it.");
+    Object.assign(task, latest.execution);
+    const structure = await captureMilestoneStructure(task, latest, directory, signal);
     if (digest(JSON.stringify(await snapshot(root))) !== latest.checkpoint)
       throw new Error("Working tree changed while binding the milestone");
-    Object.assign(task, latest.execution);
     task.goal = latest.goal ?? task.goal;
-    if (exhausted(task)) throw new Error(exhausted(task));
+    ensureStructuralBudget(task, signal);
     await save(join(task.directory, "structural-baseline.json"), structure);
     const milestone = { directory, campaign: latest.id, id, step, planHash: latest.planHash };
     await save(join(task.directory, "task.json"), { ...task, refactor: milestone });
@@ -111,6 +130,17 @@ export async function bindMilestone(ctx, id, task) {
       checkpoint: latest.checkpoint, status: "PAUSED" });
     return milestone;
   });
+}
+
+async function captureMilestoneStructure(task, current, directory, signal) {
+  const before = task.analysisMs;
+  try { return await captureStructure(task, signal); }
+  finally {
+    if (before !== task.analysisMs) {
+      current.execution = executionSnapshot(task);
+      await save(state(directory), current);
+    }
+  }
 }
 
 export async function verifyMilestone(task, paths, checks, options, tree) {
@@ -225,7 +255,7 @@ async function reconcileCheckpoint(ctx) {
   });
 }
 
-export async function refactorStatus(ctx, report = false, validate) {
+export async function refactorStatus(ctx, report = false, validate, signal) {
   const { directory, current, root } = await activeRefactor(ctx.cwd);
   if (!current) return "No active refactoring. Use /deadlion refactor start <approved-plan.md>.";
   const active = await optional(reservation(directory));
@@ -241,13 +271,13 @@ export async function refactorStatus(ctx, report = false, validate) {
   }
   const baseline = await read(join(directory, "global.json"));
   const tree = await snapshot(root);
-  const structure = await structuralMetrics(root);
   const files = changes(baseline.baseline, tree);
   const source = digest(JSON.stringify(tree));
   const final = await read(join(directory, "final-receipt.json")).catch(error => {
     if (error.code !== "ENOENT") throw error;
   });
   const evidence = final?.receipt && await read(final.receipt);
+  const { structure, structureIssue } = await reportStructure({ baseline, current, final, evidence, source, root, signal });
   const plan = await planSource(root, current.path);
   const { status, staleInputs } = await finalReceiptStatus(current, plan.planHash, source, final, evidence, async () => {
     const task = await finalRefactorTask(ctx);
@@ -262,9 +292,22 @@ export async function refactorStatus(ctx, report = false, validate) {
     changes: changedArea(files, { ...baseline.baseline.files, ...tree.files }), baselineStatus: baseline.baselineStatus,
     baselineReceipt: baseline.receipt, finalReceipt: final?.receipt,
     measurements: { baseline: baseline.measurements, final: measurementChecks(evidence) }, failedChecks: final?.failures, staleInputs,
-    sloc: { before: baseline.structure.sloc, after: structure.sloc },
-    before: baseline.structure.projects, after: structure.projects, milestones: current.results });
-  return `${status} · SLOC ${baseline.structure.sloc} → ${structure.sloc}\n${result}`;
+    sloc: { before: baseline.structure.sloc, after: structure?.sloc },
+    before: baseline.structure.projects, after: structure?.projects, structureIssue, milestones: current.results });
+  return `${status} · SLOC ${baseline.structure.sloc} → ${structure?.sloc ?? "NOT MEASURED"}\n${result}`;
+}
+
+async function reportStructure({ baseline, current, final, evidence, source, root, signal }) {
+  if (evidence?.source === source && final.receiptHash === digest(JSON.stringify(evidence))) {
+    const data = evidence.checks?.find(check => check.name === "structural ratchet")?.data;
+    if (data) return { structure: data };
+  }
+  try {
+    const task = migrateExecution(await read(join(baseline.baselineTask, "task.json")));
+    return { structure: await structuralMetrics(root, structuralOptions({ ...task, ...current.execution }, signal)) };
+  } catch (error) {
+    return { structureIssue: error.message };
+  }
 }
 
 async function resolvesWithin(root, path) {
@@ -302,14 +345,14 @@ export function milestonePrompt(step) {
     `Expected change ${step.change} Checks ${step.checks.join(", ") || step.verify} ${step.advisory.join(" ")}`;
 }
 
-export async function refactorCommand(command, ctx, verify, select, validate) {
+export async function refactorCommand(command, ctx, verify, select, validate, signal) {
   const [, operation = "status", ...words] = command.trim().split(/\s+/);
   const value = words.join(" ");
   if (operation === "start" && value) {
     const baseline = await openTask(ctx, "Capture the engineering baseline.");
     baseline.baselineCapture = true;
     const report = await verify(baseline);
-    return startRefactor(ctx, value, baseline, report.receipt);
+    return startRefactor(ctx, value, baseline, report.receipt, false, signal);
   }
   if (operation === "begin" && /^[A-Z][0-9]+$/.test(value)) {
     select("milestone " + value);
@@ -323,20 +366,20 @@ export async function refactorCommand(command, ctx, verify, select, validate) {
     select("campaign " + first.id);
     return "Next prompt will run the campaign from " + first.id + ".";
   }
-  if (operation === "verify") return finalizeCampaign(ctx, verify, validate);
+  if (operation === "verify") return finalizeCampaign(ctx, verify, validate, signal);
   if (operation === "reconcile") return reconcileCheckpoint(ctx);
-  if (["plan", "status", "report"].includes(operation)) return refactorStatus(ctx, operation === "report", validate);
+  if (["plan", "status", "report"].includes(operation)) return refactorStatus(ctx, operation === "report", validate, signal);
   return manageCampaign(ctx, operation, value, select);
 }
 
-async function finalizeCampaign(ctx, verify, validate) {
+async function finalizeCampaign(ctx, verify, validate, signal) {
   const { directory } = await activeRefactor(ctx.cwd);
   return withCampaignLock(directory, async () => {
     if (await optional(reservation(directory))) throw new Error("Resolve the active milestone before final verification");
     const final = await finalRefactorTask(ctx);
     const result = await verify(final);
     await saveCampaignFinal(final, result);
-    return refactorStatus(ctx, true, validate);
+    return refactorStatus(ctx, true, validate, signal);
   });
 }
 

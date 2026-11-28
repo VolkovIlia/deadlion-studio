@@ -78,10 +78,11 @@ export function registerVerifier(pi, controller) {
 }
 
 async function runVerifier(controller, task, ctx, args, signal) {
+  signal = controller.signal(ctx, signal);
   switch (args.action) {
     case "campaign": return result({ next: await startMission(controller, task, ctx, args.path, signal) });
-    case "replan": return replan(controller, task, ctx, args);
-    case "defer": return defer(controller, task, ctx);
+    case "replan": return replan(controller, task, ctx, args, signal);
+    case "defer": return defer(controller, task, ctx, signal);
     case "characterize_imports": {
       const check = prepareImportCheck(task, args);
       await persist(task);
@@ -93,7 +94,7 @@ async function runVerifier(controller, task, ctx, args, signal) {
       const { status, receipt, scaling, failures, receiptNotes } = report;
       let next;
       if (status === "PASS" && task.refactor && task.autonomous) {
-        next = await advanceVerified(controller, task, ctx, report);
+        next = await advanceVerified(controller, task, ctx, report, signal);
       }
       const guidance = failures?.length ? "Resolve these checks and verify again, or continue independent work. " +
         "Use import_receipt for a passing scoped run in this checkout. Use characterize_imports for import test grouping." : undefined;
@@ -102,7 +103,7 @@ async function runVerifier(controller, task, ctx, args, signal) {
   }
 }
 
-async function replan(controller, task, ctx, args) {
+async function replan(controller, task, ctx, args, signal) {
   if (!task?.autonomous || !task.refactor || !args.plan || !args.reason)
     throw new Error("An active campaign milestone, plan and rationale are required for replanning");
   if (task.last?.receipt && task.last?.failures?.length && task.recovery?.recent.at(-1)?.receipt !== task.last.receipt)
@@ -110,7 +111,7 @@ async function replan(controller, task, ctx, args) {
   await adoptTechnicalPlan(task, args.plan, args.reason, ctx);
   task.stageDeferred = true;
   await persist(task);
-  const next = await advanceMission(controller, task, ctx, "Accepted technical plan revision");
+  const next = await advanceMission(controller, task, ctx, "Accepted technical plan revision", signal);
   return result({ next: next ?? "Recorded technical revision. Inspect campaign status." });
 }
 
@@ -118,18 +119,18 @@ function result(data) {
   return { content: [{ type: "text", text: JSON.stringify(data) }], details: { receipt: data.receipt } };
 }
 
-async function advanceVerified(controller, task, ctx, report) {
+async function advanceVerified(controller, task, ctx, report, signal) {
   await completeMilestone(task, report);
   await persist(task);
-  const next = await advanceMission(controller, task, ctx, "Verified milestone " + task.refactor.id);
+  const next = await advanceMission(controller, task, ctx, "Verified milestone " + task.refactor.id, signal);
   if (next) return next;
   return openRequirements(task, ctx);
 }
 
-async function defer(controller, task, ctx) {
+async function defer(controller, task, ctx, signal) {
   if (!task.last?.failures?.length || !task.autonomous || !task.refactor)
     throw new Error("An autonomous milestone and a recorded failed check are required.");
-  const next = await continueAfterFailure(controller, task, ctx, task.last.failures[0].reason);
+  const next = await continueAfterFailure(controller, task, ctx, task.last.failures[0].reason, signal);
   if (!next && task.stageDeferred) return result({ next: await openRequirements(task, ctx) });
   return result({ next: next ?? task.blocker ?? "Dependent work remains open. Inspect the campaign DAG." });
 }

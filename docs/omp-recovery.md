@@ -1,6 +1,6 @@
 # SlopZero engineering recovery in OMP
 
-Install or upgrade through OMP Marketplace. For a locally linked release, verify the archive with `sha256sum -c deadlion-studio-4.6.7.tar.gz.sha256`, extract it and link its `plugins/deadlion` directory with `omp plugin link`. Restart OMP after updating either installation. [OMP Marketplace instructions](../README.md#omp) · [4.6.7 downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.7)
+Install or upgrade through OMP Marketplace. For a locally linked release, verify the archive with `sha256sum -c deadlion-studio-4.6.8.tar.gz.sha256`, extract it and link its `plugins/deadlion` directory with `omp plugin link`. Restart OMP after updating either installation. [OMP Marketplace instructions](../README.md#omp) · [4.6.8 downloads](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.8)
 
 ## OMP ownership and integration
 
@@ -54,6 +54,8 @@ Recovery tells the agent which file needs native `lsp` diagnostics and directs i
 The agent writes a Markdown DAG with `Status: active` and passes its project-relative `path` to `deadlion_verify` with `action: "campaign"` before implementation. The user's original goal and baseline are retained. The agent verifies each milestone with the same tool and receives the next ready stage. A campaign reaches `VERIFIED` when every required milestone and the final cumulative gate pass.
 
 Campaign state carries the original goal, base snapshot, policy, content-hashed stage receipts, checkpoints, current plan and budget. Each stage has its own task ID and the same campaign ID. Per-stage checks run when they cover the stage or an affected interface. Named required checks still run. Unscoped checks and final cumulative checks remain applicable. Verified stages are immutable. The original overall baseline is preserved even when a new plan checkpoint is recorded.
+
+Global and milestone structural baseline scans use the smaller of the operation timeout and remaining campaign time or analysis budget. An exhausted budget or cancelled scan leaves the corresponding baseline or reservation pending. The comparison report reuses structural measurements from the final receipt for the exact checkout and records `NOT MEASURED` if a fresh scan cannot run. [Issue #4](https://github.com/VolkovIlia/deadlion-studio/issues/4)
 
 After a recorded failure, the agent can use `action: "defer"` to select a ready independent stage at a clean checkpoint. Dependent stages wait for fresh verification. With unverified edits present, the agent can repair them, restore its own changes or use OMP's worktree workflow.
 

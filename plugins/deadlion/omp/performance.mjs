@@ -98,11 +98,11 @@ class EngineeringSession {
     return task;
   }
 
-  async createTask(ctx, prompt, milestone, autonomous = false) {
+  async createTask(ctx, prompt, milestone, autonomous = false, signal = this.signal(ctx)) {
     const created = await openTask(ctx, prompt);
     if (milestone) {
       created.autonomous = autonomous;
-      created.refactor = await bindMilestone(ctx, milestone, created);
+      created.refactor = await bindMilestone(ctx, milestone, created, signal);
       await persist(created);
     }
     this.rememberTask(created);
@@ -132,7 +132,7 @@ class EngineeringSession {
         task.enforcement = lifecycleContext(this.pi, ctx);
         return verify(task, this.signal(ctx), Infinity, this.semanticProbe(task));
       };
-      return refactorCommand(command, ctx, check, value => this.select(key, value), verifyToolInputs);
+      return refactorCommand(command, ctx, check, value => this.select(key, value), verifyToolInputs, this.signal(ctx));
     }
     const task = await this.taskFor(ctx, "", false, true);
     if (command === "budget" || command.startsWith("budget ")) return this.changeBudget(task, key, command);
@@ -390,7 +390,7 @@ class EngineeringSession {
       task.last = await this.finalEvidence(task, this.signal(ctx, event.signal));
       task.receipts.push(task.last.receipt);
       if (interrupted(task, event)) return await outcome(task, ctx);
-      if (task.last.status === "PASS") return await this.acceptVerification(task, ctx);
+      if (task.last.status === "PASS") return await this.acceptVerification(task, ctx, this.signal(ctx, event.signal));
       return await this.correction(task, event, ctx);
     } catch (error) {
       await this.failStop(task, ctx, event, error);
@@ -402,18 +402,18 @@ class EngineeringSession {
     }
   }
 
-  async acceptVerification(task, ctx) {
+  async acceptVerification(task, ctx, signal) {
     if (task.refactor) await completeMilestone(task, task.last);
     if (task.refactorFinal) await commitMission(task, task.last);
-    if (task.refactor && task.autonomous) return this.afterMilestone(task, ctx);
+    if (task.refactor && task.autonomous) return this.afterMilestone(task, ctx, signal);
     task.state = "VERIFIED";
     return outcome(task, ctx);
   }
 
-  async afterMilestone(task, ctx) {
+  async afterMilestone(task, ctx, signal) {
     task.state = "RECOVERING";
     await outcome(task, ctx);
-    const next = await advanceMission(this, task, ctx, "Verified milestone " + task.refactor.id);
+    const next = await advanceMission(this, task, ctx, "Verified milestone " + task.refactor.id, signal);
     if (next) return advisory(next);
     task.state = "INCOMPLETE";
     task.blocker = "No independent ready milestones. Deferred requirements remain open.";
@@ -472,7 +472,7 @@ class EngineeringSession {
     if (!canContinue || task.corrections >= limit(task.maxCorrections) ||
         (recovery.repeatedState && !semantic) || recovery.cycle || recovery.strategy === "DEFER") {
       task.state = event.signal?.aborted ? "CANCELLED" : "INCOMPLETE";
-      const next = canContinue && await continueAfterFailure(this, task, ctx, recovery.reason);
+      const next = canContinue && await continueAfterFailure(this, task, ctx, recovery.reason, this.signal(ctx, event.signal));
       await outcome(task, ctx);
       if (next) return advisory(next);
       return;

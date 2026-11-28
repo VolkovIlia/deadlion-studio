@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.8] - 2026-11-28
+
+- Use `operationSeconds` and the remaining campaign budget for structural baseline and comparison scans. Pass OMP cancellation into campaign setup and milestone transitions, and reuse matching final structure measurements in the comparison report. [Issue #4](https://github.com/VolkovIlia/deadlion-studio/issues/4)
+
 ## [4.6.7] - 2026-11-28
 
 - Resolve a recorded LSP failure with complete native diagnostics from the required server for the current checkout fingerprint. A later edit invalidates the evidence and a different server cannot clear the failure.
@@ -100,7 +104,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.7...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.8...HEAD
+[4.6.8]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.8
 [4.6.7]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.7
 [4.6.6]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.6
 [4.6.5]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.5
