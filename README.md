@@ -8,7 +8,7 @@ Deadlion Studio provides an engineering workflow for OMP, Claude Code and Codex.
 The core plugin takes a project from design to release. Its performance tools
 compare implementations against a fixed workload, correctness oracle and resource budget.
 
-**Deadlion Studio 4.5.0** includes a native engineering control plane for OMP 19.2.1. It pins the task baseline, detects changes from tools and subagents, and requires fresh evidence for approved checks before completion. [Release notes](https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.5.0) · [OMP verification report](docs/omp-engineering.md)
+**Deadlion Studio 4.6.0** adds scoped verification, project setup and resumable refactoring to the native OMP integration. The compatibility matrix records the capabilities exercised on each OMP version. [OMP guide and compatibility matrix](docs/omp-4.6.md) · [Engineering report](docs/omp-4.6-report.md)
 
 `dl-perf scale` measures how runtime, memory and operation counts change across input sizes and distributions. It reports which growth models fit the measured range and where the evidence cannot distinguish between them.
 
@@ -33,16 +33,16 @@ compare implementations against a fixed workload, correctness oracle and resourc
 
 ### OMP
 
-Install the tagged release in your OMP user profile. Keep the checkout at this location while it is linked.
+Clone the tagged release and link the package in your OMP user profile. Keep the checkout at this location while it is linked.
 
 ```sh
-git clone --branch v4.5.0 --depth 1 https://github.com/VolkovIlia/deadlion-studio.git
+git clone --branch v4.6.0 --depth 1 https://github.com/VolkovIlia/deadlion-studio.git
 omp plugin link "$PWD/deadlion-studio/plugins/deadlion"
 cd /path/to/your/project
 omp
 ```
 
-Run `/deadlion doctor` to see available tools, connected language servers and the current gate. Set `DL_ENGINEERING_POLICY` before starting OMP to approve the project's test command. For CI, the included `dl-omp` launcher returns exit code 0 only after it validates a passing receipt. Remove a user link with `omp plugin uninstall deadlion-studio`. [Policy example, project installation and update instructions](docs/omp-engineering.md#installation)
+Run `/deadlion setup` to see the recommended checks and approve project-native commands. Use `/deadlion doctor` to inspect compatibility and available tools. For CI, `dl-omp` returns exit code 0 only after validating the receipt and current workspace. Remove a user link with `omp plugin uninstall deadlion-studio`. [Setup and policy](docs/omp-4.6.md#setup-and-policy)
 
 ### Claude Code
 

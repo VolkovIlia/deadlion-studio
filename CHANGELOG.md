@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-11-28
+
+- Verification receipts bind functional coverage and workload oracles to the applicable paths. An unresolved coverage gap prevents acceptance.
+- Discover project commands and analyzers with OMP setup. Read-only work stays in Standard, and explicit task transitions preserve the original baseline and remaining budget.
+- Resume an approved refactoring DAG across sessions. Each milestone has scoped writes, structural ratcheting and a receipt. The final gate compares cumulative changes with the original baseline.
+- Check the current workspace again after OMP RPC completes. Live tests exercise pinned OMP binaries and native analyzers with scripted transport. The scaling benchmark compares strict snapshots against 4.5.0. [Guide](docs/omp-4.6.md) · [Evidence and limitations](docs/omp-4.6-report.md)
+
 ## [4.5.0] - 2026-11-28
 
 ### Native OMP integration
@@ -54,7 +61,8 @@ First public release. Earlier versions were developed privately.
 - `deadlion-triz` 4.0.0, an optional plugin with `triz-inventive-solver`.
 - `scripts/export-skills` to use the skills from Codex and GitHub Copilot.
 
-[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.5.0...HEAD
+[Unreleased]: https://github.com/VolkovIlia/deadlion-studio/compare/v4.6.0...HEAD
+[4.6.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.6.0
 [4.5.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.5.0
 [4.3.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.3.0
 [4.2.0]: https://github.com/VolkovIlia/deadlion-studio/releases/tag/v4.2.0

@@ -2,47 +2,36 @@ import { randomUUID } from "node:crypto";
 import { commands } from "./commands.mjs";
 import { join, relative, resolve } from "node:path";
 import { execute } from "./process.mjs";
-import { approvalHash, digest, incremental, inventory, openTask, persist, read, save, scripts, snapshot } from "./evidence.mjs";
+import { approvalHash, digest, incremental, openTask, persist, read, restoreTask, resumeTask, save, scripts, snapshot } from "./evidence.mjs";
 import { editPaths, feedback, lspObservation, scalingSummary } from "./diagnostics.mjs";
-import { diagnostics, hover, permitsInspection } from "./lsp.mjs";
+import { diagnostics, hover } from "./lsp.mjs";
+import { design, permitsDesignTool } from "./design.mjs";
 import { semgrepResult } from "./semgrep.mjs";
-import { verify } from "./gate.mjs";
+import { verify, verifyToolInputs } from "./gate.mjs";
+import { lifecycleContext } from "./omp-compat.mjs";
+import { authorizeRefactorTool, bindMilestone, completeMilestone, milestonePrompt, refactorCommand } from "./refactor.mjs";
 
 // Factories are rebound by OMP. Use a shared lookup only for unambiguous
 // parent identities in this process. The main gate always checks disk again.
 const owners = new Map();
 function locateParent(ctx) {
-  const matches = [...owners.values()].filter(o => o.cwd === ctx.cwd && o.agent === ctx.agent.parentId);
+  const matches = [...owners.values()].filter(o => o.agent === ctx.agent.parentId && (o.cwd === ctx.cwd || o.task.refactor));
   return matches.length === 1 ? matches[0].task : undefined;
 }
 
 const entry = "deadlion.engineering.task";
+const transitionEntry = "deadlion.engineering.transition";
 const terminal = new Set(["VERIFIED", "BLOCKED", "CANCELLED", "INCOMPLETE"]);
 const hashTree = async task => digest(JSON.stringify(await snapshot(task.cwd)));
 
 async function outcome(task, ctx) {
   await persist(task);
-  const message = `Deadlion ${task.state}: ${task.last?.status ?? "NOT VERIFIED"}. ${task.last?.receipt ?? task.directory}`;
+  const reason = task.last?.failures?.[0]?.reason || task.last?.reason;
+  const message = `Deadlion ${task.state} · ${task.last?.status ?? "NOT VERIFIED"}` +
+    (reason ? "\n" + reason : "") + "\n" + (task.last?.receipt ?? task.directory);
   ctx.ui?.notify(message, task.state === "VERIFIED" ? "info" : "warning");
   if (process.env.DL_VERDICT_FILE)
     await save(process.env.DL_VERDICT_FILE, { state: task.state, task: task.id, report: task.last });
-}
-
-async function design(task) {
-  if (task.mode === "Standard" && !task.contract) return;
-  if (task.contractIssue) return task.contractIssue;
-  const baseline = await read(join(task.directory, "baseline.json"));
-  const contracts = Object.keys(baseline.files).filter(p => /^\.performance\/.*\/contract\.json$/.test(p));
-  const path = task.approved ?? (contracts.length === 1 && resolve(task.root, contracts[0]));
-  if (!path) return "Provide an approved performance contract with alternatives, verification workload and baseline.";
-  const result = await execute([join(scripts, "dl-contract"), path], { cwd: task.cwd, timeout: 4000 });
-  if (result.code) return "dl-contract: " + result.stdout.slice(0, 350);
-  const contract = await read(path);
-  if (!contract.benchmark?.baseline) return "The approved contract needs an executable baseline.";
-  if (task.mode === "Research" && (!contract.scaling || !contract.computational_model))
-    return "Research requires a computational model and scaling workload.";
-  if (!task.baselineReceipt) return "Run deadlion_verify before implementation to measure the approved baseline.";
-  if (task.mode === "Evolution" && !task.experiment) return "Use dl-evolve with a bounded experiment and independent evaluator.";
 }
 
 class EngineeringSession {
@@ -56,28 +45,119 @@ class EngineeringSession {
   timers = new Map();
   verified = new Map();
   seen = new Map();
+  active = new Map();
+  selections = new Map();
+  delegates = new Map();
   session(ctx) { return ctx.sessionManager?.getSessionId() ?? ctx.cwd; }
 
   async taskFor(ctx, prompt = "", newRequest = false, existingOnly = false) {
     const key = this.session(ctx);
-    let task = await this.tasks.get(key);
-    if (!task) {
-      const previous = ctx.sessionManager?.getBranch().filter(e => e.type === "custom" && e.customType === entry).at(-1);
-      if (previous) task = await read(join(previous.data.directory, "task.json"));
+    const prior = this.tasks.get(key);
+    const recorded = newRequest && ctx.sessionManager?.getBranch().filter(e =>
+      e.type === "custom" && e.customType === transitionEntry).at(-1);
+    const selection = newRequest ? this.selections.get(key) ?? recorded?.data?.command : undefined;
+    if (selection) {
+      this.selections.delete(key);
+      this.pi.appendEntry?.(transitionEntry, { command: null });
     }
-    if (!task && existingOnly) return;
-    if (!task || newRequest && task.state === "VERIFIED") {
-      const promise = openTask(ctx, prompt);
-      this.tasks.set(key, promise);
-      task = await promise;
-      this.pi.appendEntry?.(entry, { directory: task.directory, id: task.id });
+    const pending = this.loadTask(ctx, { prior, selection, newRequest, existingOnly, prompt });
+    this.tasks.set(key, pending);
+    try {
+      const task = await pending;
+      if (this.tasks.get(key) === pending) {
+        if (task) this.tasks.set(key, task);
+        else this.tasks.delete(key);
+      }
+      return task;
+    } catch (error) {
+      if (this.tasks.get(key) === pending) {
+        if (prior) this.tasks.set(key, prior);
+        else this.tasks.delete(key);
+      }
+      throw error;
     }
-    this.tasks.set(key, task);
-    return task;
   }
 
-  semanticProbe() { return this.pi.getActiveTools?.().includes("lsp") ? diagnostics : undefined; }
-  async fullCheck(task, signal) {
+  async loadTask(ctx, { prior, selection, newRequest, existingOnly, prompt }) {
+    const task = await prior ?? await restoreTask(ctx, entry);
+    if (existingOnly) return task;
+    const milestone = selection?.startsWith("milestone ") ? selection.slice(10) : undefined;
+    if (!task || milestone || selection === "new" || newRequest && task.state === "VERIFIED") {
+      if (task?.refactor && !terminal.has(task.state))
+        throw new Error("Stop or finish the active refactoring milestone before starting another task");
+      if (task) this.release(ctx, task);
+      const created = await openTask(ctx, prompt);
+      if (milestone) {
+        created.refactor = await bindMilestone(ctx, milestone, created);
+        await persist(created);
+      }
+      this.pi.appendEntry?.(entry, { directory: created.directory, id: created.id });
+      return created;
+    }
+    if (newRequest && terminal.has(task.state)) resumeTask(task, selection);
+    return task;
+  }
+  release(ctx, task) {
+    const key = this.session(ctx);
+    clearTimeout(this.timers.get(key));
+    this.timers.delete(key);
+    this.active.get(key)?.abort();
+    this.active.delete(key);
+    owners.delete(key);
+    if (!task) return;
+    this.lastScan.delete(task.id);
+    this.verified.delete(task.id);
+    this.seen.delete(task.id);
+    this.delegates.delete(task.id);
+    for (const [id, pending] of this.pendingLsp) if (pending.task === task.id) this.pendingLsp.delete(id);
+  }
+
+  async transition(command, ctx) {
+    const key = this.session(ctx);
+    const task = await this.taskFor(ctx, "", false, true);
+    if (command === "refactor" || command.startsWith("refactor ")) {
+      const check = async task => {
+        task.enforcement = lifecycleContext(this.pi, ctx);
+        return verify(task, this.signal(ctx), 20000, this.semanticProbe(task));
+      };
+      return refactorCommand(command, ctx, check, value => this.select(key, value));
+    }
+    if (command === "stop") {
+      if (task && !terminal.has(task.state)) {
+        task.state = "INCOMPLETE";
+        task.last = { status: "NOT VERIFIED", reason: "Stopped by the operator" };
+        this.release(ctx, task);
+        ctx.abort?.();
+        await outcome(task, ctx);
+      }
+      return "Engineering task stopped.";
+    }
+    if (command === "retry") {
+      if (!task) throw new Error("No engineering task to retry");
+      const report = await this.fullCheck(task, undefined, ctx);
+      task.last = report;
+      await persist(task);
+      return `${report.status} · ${report.receipt}`;
+    }
+    if (command !== "new" && !task) throw new Error("No engineering task to " + command);
+    this.select(key, command);
+    return `Next prompt will ${command === "new" ? "start a new task" : command + " the task"}.`;
+  }
+
+  select(key, command) {
+    this.selections.set(key, command);
+    this.pi.appendEntry?.(transitionEntry, { command });
+  }
+
+  semanticProbe(task) { return this.pi.getActiveTools?.().includes("lsp") &&
+    (task.policy.trustProject || task.policy.requireLsp || task.policy.native) ? diagnostics : undefined; }
+
+  signal(ctx, signal) {
+    const current = ctx && this.active.get(this.session(ctx))?.signal;
+    return current && signal ? AbortSignal.any([current, signal]) : current ?? signal;
+  }
+  async fullCheck(task, signal, ctx) {
+    signal = this.signal(ctx, signal);
     const baseline = task.designIssue?.startsWith("Run deadlion_verify") && !task.baselineReceipt;
     if (baseline) {
       const original = await read(join(task.directory, "baseline.json"));
@@ -104,7 +184,7 @@ class EngineeringSession {
       await persist(task);
       return { status: data.status, receipt, purpose: "baseline", scaling: scalingSummary(data) };
     }
-    const report = await verify(task, signal, task.analysisMs, this.semanticProbe());
+    const report = await verify(task, signal, task.analysisMs, this.semanticProbe(task));
     if (report.status === "PASS") this.verified.set(task.id, report);
     await persist(task);
     return report;
@@ -112,18 +192,31 @@ class EngineeringSession {
 
   async before_agent_start(event, ctx) {
     if (ctx.agent?.kind === "sub") return;
-    const task = await this.taskFor(ctx, event.prompt, true);
+    let task;
+    try { task = await this.taskFor(ctx, event.prompt, true); }
+    catch (error) {
+      ctx.ui?.notify(error.message, "error");
+      if (process.env.DL_VERDICT_FILE) await save(process.env.DL_VERDICT_FILE,
+        { state: "INCOMPLETE", reason: error.message });
+      ctx.abort?.();
+      return;
+    }
+    const key = this.session(ctx);
+    task.enforcement = lifecycleContext(this.pi, ctx);
+    if (!this.active.has(key)) this.active.set(key, new AbortController());
+    const generation = this.active.get(key);
     task.semgrepTools = this.pi.getActiveTools?.().filter(name => /semgrep/i.test(name)) ?? [];
     owners.set(this.session(ctx), { cwd: ctx.cwd, agent: ctx.agent?.id, task });
-    clearTimeout(this.timers.get(this.session(ctx)));
+    clearTimeout(this.timers.get(key));
     const timer = setTimeout(async () => {
-      if (terminal.has(task.state)) return;
+      if (this.active.get(key) !== generation || terminal.has(task.state)) return;
+      generation.abort();
       task.state = "INCOMPLETE";
       task.last = { status: "NOT VERIFIED", reason: "wall-clock budget exhausted" };
       try { await outcome(task, ctx); } finally { ctx.abort?.(); }
     }, Math.max(1, task.deadline - Date.now()));
     timer.unref();
-    this.timers.set(this.session(ctx), timer);
+    this.timers.set(key, timer);
     task.designIssue = await design(task);
     task.state = task.designIssue ? "DESIGN" : "IMPLEMENTATION";
     await persist(task);
@@ -131,7 +224,8 @@ class EngineeringSession {
       "workflow, unix-design, decompose, write-plan, performance, build and verify";
     return { message: { customType: "deadlion.policy", display: false,
       content: `Deadlion ${task.mode} (${task.kind}). Correctness, safety and approved resource limits take priority over simplicity. ` +
-      `Use applicable ${skills} skills. ` + (task.designIssue ?? "Supply executable evidence.") } };
+      `Use applicable ${skills} skills. Check algorithm, data structures, repeated work, allocations and invariants. ` +
+      (task.designIssue ?? "Supply executable evidence.") + " " + milestonePrompt(task.refactor?.step) } };
   }
 
   async tool_call(event, ctx) {
@@ -139,14 +233,27 @@ class EngineeringSession {
     try { task = ctx.agent?.kind === "sub" ? locateParent(ctx) : await this.taskFor(ctx); }
     catch (error) { return { block: true, reason: "Deadlion initialization failed: " + error.message }; }
     if (!task) return;
-    if (task.designIssue && !["read", "grep", "find", "ls", "deadlion_verify"].includes(event.toolName)) {
-      const paths = editPaths(event);
-      const docs = ["edit", "write"].includes(event.toolName) && paths.length && paths.every(p => p.endsWith(".md"));
-      const inspect = event.toolName === "lsp" && await permitsInspection(ctx.cwd, event.input).catch(() => false);
-      if (!docs && !inspect) return { block: true, reason: task.designIssue };
+    if (task.refactor) {
+      const reason = authorizeRefactorTool(task, event, ctx, editPaths(event));
+      if (reason) return { block: true, reason };
     }
+    if (event.toolName === "lsp" && !this.semanticProbe(task) && event.input?.action !== "status")
+      return { block: true, reason: "Approve project-native language servers with /deadlion setup." };
+    if (task.designIssue && !await permitsDesignTool(event, ctx))
+      return { block: true, reason: task.designIssue };
     if (event.toolName === "lsp" && event.input?.action === "diagnostics" || task.semgrepTools?.includes(event.toolName))
-      this.pendingLsp.set(event.toolCallId, await hashTree(task));
+      this.pendingLsp.set(event.toolCallId, { task: task.id, source: await hashTree(task) });
+  }
+
+  async before_subagent_spawn(event, ctx) {
+    const task = ctx.agent?.kind === "sub" ? locateParent(ctx) : await this.taskFor(ctx, "", false, true);
+    if (!task?.refactor) return;
+    const scopes = task.refactor.step.owners;
+    if (!this.delegates.has(task.id)) this.delegates.set(task.id, new Set());
+    const delegated = this.delegates.get(task.id);
+    if (ctx.agent?.kind === "sub" || !Object.hasOwn(scopes, event.agent) || delegated.has(event.agent))
+      return { block: true, reason: "Milestone requires a unique subagent with an assigned scope" };
+    delegated.add(event.agent);
   }
 
   async tool_result(event, ctx) {
@@ -157,21 +264,27 @@ class EngineeringSession {
       agent: ctx.agent, tool: event.toolName, paths: editPaths(event), error: event.isError });
 
     if (!sub) await this.collectSemantic(task, event, ctx);
-    const direct = ["edit", "write"].includes(event.toolName);
-    if (!direct) {
-      if (!["bash", "eval", "python", "patch", "task"].includes(event.toolName) ||
-          task.analysisMs < 2000 || Date.now() - (this.lastScan.get(task.id) ?? 0) < 1500) return;
-      this.lastScan.set(task.id, Date.now());
-      const paths = await incremental(task);
-      event = { ...event, input: { paths } };
+    if (!["edit", "write"].includes(event.toolName)) {
+      event = await this.opaqueEdit(task, event, ctx);
+      if (!event) return;
     }
     await this.writethrough(task, event, ctx, sub);
     if (!this.seen.has(task.id)) this.seen.set(task.id, new Set());
     const started = Date.now();
     if (started >= task.deadline || task.analysisMs <= 0) return;
-    try { return await feedback(task, event, ctx, this.seen.get(task.id), this.semanticProbe() && hover); }
+    try { return await feedback(task, event, ctx, this.seen.get(task.id), this.semanticProbe(task) && hover, this.signal(ctx)); }
     catch (error) { return { additionalContext: "Deadlion incremental analysis NOT VERIFIED: " + error.message }; }
     finally { task.analysisMs = Math.max(0, task.analysisMs - (Date.now() - started)); }
+  }
+
+  async opaqueEdit(task, event, ctx) {
+    if (!["bash", "eval", "python", "patch", "task"].includes(event.toolName) ||
+        task.analysisMs < 2000 || Date.now() - (this.lastScan.get(task.id) ?? 0) < 1500) return;
+    this.lastScan.set(task.id, Date.now());
+    let paths;
+    try { paths = await incremental(task, this.signal(ctx)); }
+    catch { return; } // The final gate reconciles the full tree.
+    return { ...event, input: { paths } };
   }
 
   async writethrough(task, event, ctx, sub) {
@@ -226,9 +339,11 @@ class EngineeringSession {
   }
 
   async session_shutdown(_event, ctx) {
-    clearTimeout(this.timers.get(this.session(ctx)));
-    owners.delete(this.session(ctx));
-    const task = await this.tasks.get(this.session(ctx));
+    const key = this.session(ctx);
+    const task = await this.tasks.get(key);
+    this.release(ctx, task);
+    this.tasks.delete(key);
+    this.selections.delete(key);
     if (task && !terminal.has(task.state)) await persist(task);
   }
 
@@ -245,47 +360,58 @@ class EngineeringSession {
         ctx.abort?.();
         return;
       }
-      task.last = await this.finalEvidence(task, event.signal);
+      task.last = await this.finalEvidence(task, this.signal(ctx, event.signal));
       task.receipts.push(task.last.receipt);
-      if (task.state === "INCOMPLETE" || event.signal?.aborted) {
+      if (["CANCELLED", "INCOMPLETE"].includes(task.state) || event.signal?.aborted) {
         if (event.signal?.aborted && task.state !== "INCOMPLETE") task.state = "CANCELLED";
         await outcome(task, ctx);
         return;
       }
       if (task.last.status === "PASS") {
+        if (task.refactor) await completeMilestone(task, task.last);
         task.state = "VERIFIED";
         await outcome(task, ctx);
         return;
       }
       return await this.correction(task, event, ctx);
     } catch (error) {
-      if (task) {
-        task.state = "BLOCKED";
-        task.last = { status: "NOT VERIFIED", reason: error.message };
-        await outcome(task, ctx);
-      } else {
-        ctx.ui?.notify("Deadlion BLOCKED: " + error.message, "error");
-        if (process.env.DL_VERDICT_FILE) await save(process.env.DL_VERDICT_FILE, { state: "BLOCKED", reason: error.message });
-      }
+      await this.failStop(task, ctx, event, error);
       ctx.abort?.();
+    } finally {
+      if (task && terminal.has(task.state)) this.release(ctx, task);
+    }
+  }
+
+  async failStop(task, ctx, event, error) {
+    if (task) {
+      if (!["CANCELLED", "INCOMPLETE"].includes(task.state)) task.state = event.signal?.aborted ? "CANCELLED" : "BLOCKED";
+      task.last = { status: "NOT VERIFIED", reason: error.message };
+      await outcome(task, ctx);
+    } else {
+      ctx.ui?.notify("Deadlion BLOCKED: " + error.message, "error");
+      if (process.env.DL_VERDICT_FILE) await save(process.env.DL_VERDICT_FILE, { state: "BLOCKED", reason: error.message });
     }
   }
 
   async finalEvidence(task, signal) {
     const previous = this.verified.get(task.id);
     this.verified.delete(task.id);
-    if (previous && !task.policy.semgrepConfig && Date.now() < task.deadline && previous.source === await hashTree(task) &&
-        previous.receiptHash === digest(JSON.stringify(await read(previous.receipt))) &&
-        (!task.approved || task.approvalHash === await approvalHash(task)) &&
-        JSON.stringify(task.tools) === JSON.stringify(await inventory(task.root, task.policy))) return previous;
-    return verify(task, signal, 20000, this.semanticProbe());
+    if (previous && !signal?.aborted && !task.policy.semgrepConfig && Date.now() < task.deadline &&
+        previous.source === await hashTree(task) &&
+        previous.receiptHash === digest(JSON.stringify(await read(previous.receipt)))) {
+      await verifyToolInputs(task, { signal });
+      if (!signal?.aborted) return previous;
+    }
+    return verify(task, signal, 20000, this.semanticProbe(task));
   }
 
   async collectSemantic(task, event, ctx) {
+    const pending = this.pendingLsp.get(event.toolCallId);
+    this.pendingLsp.delete(event.toolCallId);
+    if (pending?.task !== task.id) return;
     if (task.semgrepTools?.includes(event.toolName)) {
       const data = semgrepResult(event);
-      const source = this.pendingLsp.get(event.toolCallId);
-      this.pendingLsp.delete(event.toolCallId);
+      const { source } = pending;
       if (data && source === await hashTree(task)) {
         task.semgrep = { source, data };
         await persist(task);
@@ -295,12 +421,11 @@ class EngineeringSession {
     if (info) {
       const sourceHash = await hashTree(task);
       const file = relative(task.root, resolve(ctx.cwd, info.file));
-      if (this.pendingLsp.get(event.toolCallId) === sourceHash) {
+      if (pending.source === sourceHash) {
         task.semantic ??= {};
         task.semantic[file] = { ...info, sourceHash };
         await persist(task);
       }
-      this.pendingLsp.delete(event.toolCallId);
     }
   }
 
@@ -330,17 +455,18 @@ export default function performance(pi) {
     parameters: pi.zod.object({}),
     async execute(_id, _args, signal, _update, ctx) {
       if (ctx.agent.kind === "sub") throw new Error("The main session owns verification.");
-      const report = await controller.fullCheck(await controller.taskFor(ctx), signal);
+      const report = await controller.fullCheck(await controller.taskFor(ctx), signal, ctx);
       return { content: [{ type: "text", text: JSON.stringify({ status: report.status, receipt: report.receipt, scaling: report.scaling, failures: report.failures?.slice(0, 5) }) }],
         details: { receipt: report.receipt } };
     },
   });
   pi.on("before_agent_start", controller.before_agent_start.bind(controller));
   pi.on("tool_call", controller.tool_call.bind(controller));
+  pi.on("before_subagent_spawn", controller.before_subagent_spawn.bind(controller));
   pi.on("tool_result", controller.tool_result.bind(controller));
   pi.on("turn_end", controller.turn_end.bind(controller));
   pi.on("agent_end", controller.agent_end.bind(controller));
   pi.on("session_shutdown", controller.session_shutdown.bind(controller));
   pi.on("session_stop", controller.session_stop.bind(controller));
-  commands(pi, controller.taskFor.bind(controller), controller.fullCheck.bind(controller));
+  commands(pi, controller.taskFor.bind(controller), controller.fullCheck.bind(controller), controller.transition.bind(controller));
 }

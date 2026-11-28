@@ -12,15 +12,26 @@ NAMES = ("omp", "python3", "ruff", "ast-grep", "semgrep", "clangd", "clang-tidy"
          "kotlin-language-server", "kotlin-lsp", "pylsp", "detekt", "eslint", "typescript-language-server", "pyright-langserver",
          "perf", "memray", "heaptrack", "scalene", "valgrind", "jfr", "bwrap")
 
+MANIFESTS = {"Cargo.toml", "package.json", "go.mod", "pyproject.toml", "pom.xml",
+             "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "Makefile",
+             "requirements.txt", "pytest.ini", "setup.cfg", "gradlew"}
+CONFIG = MANIFESTS | {"Cargo.lock", "go.sum", "package-lock.json", "pnpm-lock.yaml", "uv.lock",
+                      "ruff.toml", ".ruff.toml", ".clang-tidy", "compile_commands.json",
+                      "detekt.yml", "detekt.yaml", "tsconfig.json", ".eslintrc", ".gitattributes",
+                      "gradle-wrapper.properties", "gradle.properties", ".gitignore"}
+LANGUAGES = {".rs": "Rust", ".py": "Python", ".go": "Go", ".c": "C", ".cpp": "C++", ".cc": "C++",
+             ".java": "Java", ".kt": "Kotlin", ".kts": "Kotlin", ".ts": "TypeScript",
+             ".tsx": "TypeScript", ".js": "JavaScript", ".mjs": "JavaScript"}
+
 
 def identity(path):
     stat = Path(path).stat()
     return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_ctime_ns]
 
 
-def inventory(venv):
+def inventory(venv, root=None):
     result = {}
-    root = Path.cwd()
+    root = root or Path.cwd()
     for name in NAMES:
         path = shutil.which(name)
         local = [root / venv / "bin" / name, root / "node_modules/.bin" / name]
@@ -42,19 +53,94 @@ def approval_inputs(policy):
         if not argv:
             continue
         command = shutil.which(argv[0])
-        paths = [Path(p) for p in argv[1:] if os.path.isabs(p)]
+        paths = [Path(p) for p in argv[1:] if os.path.isabs(p) and not Path(p).is_relative_to(root)]
+        if len(argv) > 1 and Path(argv[0]).name in {"python", "python3", "node", "bash", "sh", "ruby"} and not argv[1].startswith("-"):
+            paths.append(root / argv[1])
         if command:
             paths.append(Path(command).absolute())
         for path in paths:
-            if not path.is_relative_to(root) and path.is_file():
+            if path.is_file():
                 inputs[str(path)] = identity(path)
     db = os.getenv("DL_COMPILE_COMMANDS")
     if db:
         inputs[db] = hashlib.sha256(Path(db).read_bytes()).hexdigest()
+    for name in policy.get("verificationInputs", []):
+        path = root / name
+        if path.resolve() != path or not path.exists():
+            raise ValueError(f"verification input unavailable or a symlink: {name}")
+        files = sorted(path.rglob("*")) if path.is_dir() else [path]
+        for item in files:
+            if item.is_symlink():
+                raise ValueError(f"symlink in verification inputs: {item}")
+            if item.is_file():
+                with item.open("rb") as handle:
+                    inputs[str(item)] = hashlib.file_digest(handle, "sha256").hexdigest()
     return inputs
 
 
+def project_files():
+    probe = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True)
+    if probe.returncode == 0:
+        root = Path(os.fsdecode(probe.stdout).rstrip("\n")).resolve()
+        status = subprocess.check_output(["git", "--no-optional-locks", "status", "--porcelain=v1", "-z"], cwd=root)
+        paths = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=root)
+        return root, True, bool(status), sorted(set(map(os.fsdecode, filter(None, paths.split(b"\0")))))
+    root = Path.cwd().resolve()
+    names = []
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in {"node_modules", "target", "build", "__pycache__"}]
+        names.extend(str((Path(folder) / file).relative_to(root)) for file in files)
+    return root, False, False, sorted(names)
+
+
+def test_command(root, paths, manifests):
+    if "Makefile" in manifests and any(row.startswith("test:") for row in (root / "Makefile").read_text(errors="replace").splitlines()):
+        return ["make", "test"]
+    if "Cargo.toml" in manifests:
+        return ["cargo", "test", "--workspace", "--offline"]
+    if "go.mod" in manifests:
+        return ["go", "test", "./..."]
+    if "package.json" in manifests and json.loads((root / "package.json").read_bytes()).get("scripts", {}).get("test"):
+        return ["npm", "test"]
+    if "gradlew" in manifests:
+        return ["./gradlew", "--offline", "test"]
+    if "pom.xml" in manifests:
+        return ["mvn", "--offline", "test"]
+    if any(Path(path).name.startswith("test_") and path.endswith(".py") for path in paths):
+        return ["python3", "-m", "pytest", "-q"]
+
+
+def discover():
+    root, git, dirty, names = project_files()
+    paths = [Path(name) for name in names]
+    configs = [p for p in paths if p.name in CONFIG or p.parts[0] in {".omp", ".performance"} or
+               p.name.startswith(("eslint.config.", ".eslintrc."))]
+    approved = {}
+    for path in configs:
+        item = root / path
+        if item.resolve() == item and item.is_file() and item.stat().st_size <= 4 << 20:
+            with item.open("rb") as handle:
+                approved[str(path)] = hashlib.file_digest(handle, "sha256").hexdigest()
+    manifests = [p for p in approved if Path(p).name in MANIFESTS]
+    tests = test_command(root, names, manifests)
+    tools = [name for name, info in inventory(".venv", root).items() if info["status"] == "installed"]
+    policy = {"trustProject": True, "native": True, "verificationInputs": list(approved)} if approved else {
+        "trustProject": True, "native": True}
+    if tests:
+        policy.update(tests=tests, testsScope=["."])
+    fingerprint = hashlib.sha256(json.dumps([str(root), policy, approved], sort_keys=True).encode()).hexdigest()
+    return dict(root=str(root), git=git, dirty=dirty, manifests=manifests, tools=tools, policy=policy,
+                languages=sorted({LANGUAGES[p.suffix] for p in paths if p.suffix in LANGUAGES}),
+                components=sorted({str(Path(p).parent) for p in manifests}), fingerprint=fingerprint,
+                benchmarks=[p for p in names if "benchmark" in p or "/benches/" in p][:40],
+                contracts=[p for p in approved if p.startswith(".performance/") and p.endswith("/contract.json")],
+                generated=[p for p in names if "generated" in p.split("/")][:40])
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--discover"]:
+        print(json.dumps(discover()))
+        sys.exit(0)
     core = Path(__file__).resolve().parents[1] / "skills"
     h = hashlib.sha256()
     for parent in ("performance", "suckless-code"):

@@ -130,6 +130,13 @@ def evaluate(root, revision, selected):
                 text=True,
             )
             result = json.loads(r.stdout)
+            contract = json.loads((Path(tmp) / path).read_bytes())
+            result["scope"] = {
+                "contract": path,
+                "candidate_root": str(impl.relative_to(root)),
+                "candidate_files": contract["benchmark"].get("candidate_files"),
+                "workload": contract["workload"],
+            }
             reports.append(result)
             if r.returncode:
                 return dict(

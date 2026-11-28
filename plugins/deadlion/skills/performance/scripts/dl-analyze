@@ -111,10 +111,38 @@ def arguments():
     parser.add_argument("--infer-cost", action="store_true", help="capture trusted Java sources with Infer Cost")
     parser.add_argument("--native", action="store_true", help="run installed project-aware tools for trusted source")
     parser.add_argument("--deep", action="store_true", help="also apply structural hints to Python")
+    parser.add_argument("--available", action="store_true", help="use the available isolated analyzers")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--cache-dir", type=Path, help="private directory for verified clean Ruff snapshots")
     parser.add_argument("paths", nargs="*", type=Path)
     return parser.parse_args()
+
+
+def isolated_analyzers(files, args):
+    python = [p for p in files if p.suffix == ".py"]
+    native = files if args.deep else [p for p in files if p.suffix in AST_SUFFIXES]
+    findings = []
+    checked = []
+    unavailable = []
+    if python:
+        if args.available and not shutil.which("ruff"):
+            from python_hints import hints
+            unavailable.append("ruff")
+            for path in python:
+                findings.extend(hints(path, path.read_text()))
+        elif args.cache_dir and not args.deep:
+            findings.extend(cached_python(python, args.cache_dir))
+            checked.append("ruff")
+        else:
+            findings.extend(inspect(["--", *python], deep=args.deep))
+            checked.append("ruff")
+    if native:
+        if args.available and not shutil.which("ast-grep"):
+            unavailable.append("ast-grep")
+        else:
+            findings.extend(structural(native))
+            checked.append("ast-grep")
+    return findings, checked, unavailable
 
 
 def main():
@@ -135,16 +163,7 @@ def main():
     files = sorted(set(paths))
     if any(not p.is_file() or p.suffix not in SUFFIXES for p in files):
         raise ValueError("unsupported or missing input file")
-    python = [p for p in files if p.suffix == ".py"]
-    native = files if args.deep else [p for p in files if p.suffix in AST_SUFFIXES]
-    findings = []
-    if python:
-        if args.cache_dir and not args.deep:
-            findings.extend(cached_python(python, args.cache_dir))
-        else:
-            findings.extend(inspect(["--", *python], deep=args.deep))
-    if native:
-        findings.extend(structural(native))
+    findings, checked, unavailable = isolated_analyzers(files, args)
     coverage = {}
     if args.infer_cost:
         from native_diagnostics import infer_cost
@@ -156,7 +175,9 @@ def main():
     findings = aggregate(findings)
     report = dict(status="CHECKED" if files else "NOT APPLICABLE", scope="Ruff PERF and Deadlion AST rules",
                   files=len(files), diagnostics=findings)
-    report["checked_tools"] = (["ruff"] if python else []) + (["ast-grep"] if native else [])
+    report["checked_tools"] = checked
+    if unavailable:
+        report["unavailable_tools"] = unavailable
     if args.infer_cost:
         report["scope"] += " and Infer Cost"
     if args.native:

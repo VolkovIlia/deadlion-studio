@@ -36,7 +36,7 @@ export async function regular(root, paths) {
 }
 
 export async function analyze(files, options, native = false, infer = false, deep = false) {
-  const result = await execute([join(scripts, "dl-analyze"), "--json", ...(deep ? ["--deep"] : []), ...(native ? ["--native"] : []), ...(infer ? ["--infer-cost"] : []),
+  const result = await execute([join(scripts, "dl-analyze"), "--json", "--available", ...(deep ? ["--deep"] : []), ...(native ? ["--native"] : []), ...(infer ? ["--infer-cost"] : []),
     "--", ...files], options);
   const report = JSON.parse(result.stdout);
   if (result.code || report.status !== "CHECKED") throw new Error(report.reason || result.stderr || report.status);
@@ -75,15 +75,15 @@ export function compact(report, seen) {
   return { total: problems.size, new: fresh.length, diagnostics };
 }
 
-export async function feedback(task, event, ctx, seen, lookup) {
+export async function feedback(task, event, ctx, seen, lookup, signal) {
   const files = await regular(task.root, editPaths(event).map(p => resolve(ctx.cwd, p)).filter(supported));
   if (!files.length) return;
-  const report = await analyze(files, { cwd: ctx.cwd, timeout: Math.min(5000, task.analysisMs, task.deadline - Date.now()) });
+  const report = await analyze(files, { cwd: ctx.cwd, signal, timeout: Math.min(5000, task.analysisMs, task.deadline - Date.now()) });
   const target = report.diagnostics.find(d => d.semanticTarget);
-  if (lookup && target && task.policy.requireLsp) {
+  if (lookup && target) {
     const before = await realpath(target.file);
     const timeout = AbortSignal.timeout(Math.max(1, Math.min(3000, task.analysisMs, task.deadline - Date.now())));
-    try { target.typeContext = await lookup(ctx.cwd, before, target.semanticTarget, timeout); }
+    try { target.typeContext = await lookup(ctx.cwd, before, target.semanticTarget, signal ? AbortSignal.any([signal, timeout]) : timeout); }
     catch (error) { target.semanticStatus = "INCONCLUSIVE"; target.semanticReason = error.message; }
   }
   report.filesAnalyzed = files;
@@ -100,7 +100,7 @@ export function lspObservation(event) {
   const clean = server && event.details?.success && output.trim() === "OK";
   const summary = output.split("\n", 1)[0];
   const reported = server && event.details?.success;
-  const errors = reported && /\d+ errors?\b/.test(summary);
+  const errors = reported && /\b[1-9]\d* errors?\b/.test(summary);
   const warnings = reported && /\d+ (warnings?|info|hints?)\b/.test(summary) &&
     !/unreported|still pending|some servers failed|no fresh report/i.test(output);
   return { source: "omp:lsp", file: event.input.file, server, output,

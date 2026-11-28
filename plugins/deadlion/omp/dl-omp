@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run one engineering task through installed OMP RPC and require its final verdict."""
 import argparse
+from contextlib import suppress
 import hashlib
 import json
 import os
@@ -25,7 +26,7 @@ def feed(stream, events):
         events.put(None)
 
 
-def validated(verdict):
+def validated(verdict, deadline):
     if verdict.get("state") != "VERIFIED":
         return verdict
     try:
@@ -34,9 +35,18 @@ def validated(verdict):
         if hashlib.sha256(content).hexdigest() != report["receiptHash"]:
             raise ValueError("receipt digest mismatch")
         evidence = json.loads(content)
-        if evidence["task"] != verdict["task"] or evidence["status"] != "PASS" or evidence["source"] != report["source"]:
+        if (evidence["task"] != verdict["task"] or evidence["status"] != "PASS" or
+                evidence["source"] != report["source"] or not report["source"] or
+                evidence["version"] != 2 or any(row["status"] != "VERIFIED" for row in evidence["coverage"])):
             raise ValueError("receipt scope or verdict mismatch")
-    except (KeyError, OSError, ValueError, TypeError) as error:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("no remaining budget to revalidate the verified workspace")
+        actual = subprocess.check_output([sys.executable, "-I", Path(__file__).resolve().with_name("workspace.py"), "--digest"],
+                                         timeout=remaining, text=True).strip()
+        if actual != evidence["workspaceHash"]:
+            raise ValueError("workspace changed after the OMP verdict")
+    except (KeyError, OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
         return {"state": "INCOMPLETE", "reason": str(error)}
     return verdict
 
@@ -97,20 +107,27 @@ def main():
             cmd.extend(["--resume", args.resume])
         if args.offline:
             cmd.append("--offline")
-        proc = subprocess.Popen(cmd, env={**os.environ, "DL_VERDICT_FILE": str(path)},
+        proc = subprocess.Popen(cmd, env={**os.environ, "DL_VERDICT_FILE": str(path),
+                                         "DL_RESUME_TASK": "1" if args.resume else "0"},
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, start_new_session=True)
+        deadline = time.monotonic() + args.seconds
         try:
-            verdict = validated(supervise(proc, path, args.prompt, time.monotonic() + args.seconds))
+            verdict = supervise(proc, path, args.prompt, deadline)
         except KeyboardInterrupt:
             verdict = {"state": "CANCELLED"}
+        except (OSError, ValueError) as error:
+            verdict = {"state": "INCOMPLETE", "reason": str(error)}
         finally:
             if proc.poll() is None:
-                os.killpg(proc.pid, signal.SIGTERM)
+                with suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGTERM)
                 try:
                     proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    with suppress(ProcessLookupError):
+                        os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait()
+        verdict = validated(verdict, deadline)
         print(json.dumps(verdict))
         return 0 if verdict["state"] == "VERIFIED" else 2
 

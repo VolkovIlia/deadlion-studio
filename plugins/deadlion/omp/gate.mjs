@@ -1,12 +1,17 @@
-import { join, basename, dirname, relative } from "node:path";
+import { join, basename, dirname, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { activeForFile } from "./lsp.mjs";
 import { checkSemgrep } from "./semgrep.mjs";
 import { execute } from "./process.mjs";
-import { approvalHash, changes, digest, inventory, limits, read, save, scripts, snapshot } from "./evidence.mjs";
+import { approvalHash, changes, digest, inventory, limits, read, samePython, save, scripts, snapshot } from "./evidence.mjs";
 import { analyze, gateFindings, regular, scalingSummary, supported } from "./diagnostics.mjs";
+import { changedArea, contains, contractCoverage, coverageFor, documentation } from "./coverage.mjs";
+import { compatibility } from "./omp-compat.mjs";
+import { verifyMilestone } from "./refactor.mjs";
 
 const semanticSource = p => supported(p) || /\.(h|hpp|tsx|jsx|mjs|cjs)$/.test(p);
+const testInput = /(?:^|\/)(?:conftest\.py|pytest\.ini|tests?\/[^/]+|test_[^/]+\.py|[^/]+_test\.go|[^/]+\.(?:spec|test)\.[^/]+)$/i;
 
 function semanticStatus(item, required) {
   return !required && ["NOT VERIFIED", "INCONCLUSIVE"].includes(item.status) ? "WARNING" : item.status;
@@ -29,7 +34,7 @@ async function checkSemantics(task, files, source, checks, options, probe) {
       }
     }
     if (item?.sourceHash === source) checks.push({ name: "lsp " + p, ...item,
-      status: semanticStatus(item, required) });
+      status: semanticStatus(item, required), coverage: { type: "semantic", paths: [p] } });
     else if (required) checks.push({ name: "lsp " + p, status: "NOT VERIFIED" });
   }
 }
@@ -40,16 +45,13 @@ async function checkScope(task, baseline, current, paths, files, options, checks
     checks.push({ name: "accepted Evolution candidate", status: agrees ? "PASS" : "NOT VERIFIED",
       commit: task.experiment.commit });
   }
-  const protectedPaths = task.policy.protectedPaths ?? [];
-  if (paths.some(p => protectedPaths.some(name => p === name || p.startsWith(name + "/"))))
-    checks.push({ name: "approved verification inputs changed", status: "BLOCKED" });
-  if (paths.some(p => basename(p) === ".budget" || /^\.performance\/.*\/contract\.json$/.test(p) && baseline.files[p]))
-    checks.push({ name: "approved policy changed", status: "BLOCKED" });
+  checkProtectedInputs(task, baseline, paths, checks);
   // A test of the working tree cannot certify different bytes staged for commit.
   if (current.git && paths.some(p => JSON.stringify(current.files[p]?.[0]) !== JSON.stringify(baseline.files[p]?.[0]))) {
     const mismatch = await execute(["git", "diff", "--quiet", "--", ...paths], options());
     if (mismatch.code !== 0) checks.push({ name: "index differs from tested files", status: "NOT VERIFIED" });
   }
+  if (task.refactor || task.refactorFinal) return;
   await checkSize(task, files, checks, run);
   const budgets = Object.keys(current.files).filter(p => basename(p) === ".budget");
   for (const path of budgets) {
@@ -57,6 +59,20 @@ async function checkScope(task, baseline, current, paths, files, options, checks
     if (paths.some(p => scope === "." || p.startsWith(scope + "/")))
       await run("dl-budget", [join(limits, "dl-budget"), scope], false);
   }
+}
+
+function checkProtectedInputs(task, baseline, paths, checks) {
+  const protectedPaths = [...task.policy.protectedPaths ?? [], ...task.policy.verificationInputs ?? []];
+  const modifiedInputs = paths.filter(p => protectedPaths.some(name => contains(name, p)));
+  if (modifiedInputs.length)
+    checks.push({ name: "approved verification inputs changed", status: "BLOCKED",
+      reason: modifiedInputs.join(", "), coverage: { type: "verification-input", paths: modifiedInputs } });
+  const changedTests = paths.filter(p => testInput.test(p) && (baseline.files[p] || /(?:conftest\.py|pytest\.ini)$/.test(p)));
+  if (task.policy.tests && changedTests.length && paths.some(p => !documentation(p) && !testInput.test(p)))
+    checks.push({ name: "existing tests changed with production code", status: "BLOCKED",
+      reason: "Approve the test revision independently before using it: " + changedTests.slice(0, 5).join(", ") });
+  if (paths.some(p => basename(p) === ".budget" || /^\.performance\/.*\/contract\.json$/.test(p) && baseline.files[p]))
+    checks.push({ name: "approved policy changed", status: "BLOCKED" });
 }
 
 async function checkSize(task, files, checks, run) {
@@ -101,23 +117,37 @@ async function checkAnalyzers(task, sources, options, checks) {
       const missing = (task.policy.requiredAnalyzers || []).filter(name => name !== "semgrep" && !data.checked_tools.includes(name) &&
         data.native_tools?.[name === "clippy" ? "cargo" : name] !== "selected");
       checks.push({ name: "dl-analyze", status: missing.length ? "NOT VERIFIED" :
-        data.diagnostics.length ? "WARNING" : "PASS", missing, data });
+        data.diagnostics.length || data.unavailable_tools?.length ? "WARNING" : "PASS", missing, data,
+        coverage: { type: "static", paths: sources.map(path => relative(task.root, path)) },
+        reason: missing.length ? "Required analyzer not installed or unsuccessful: " + missing.join(", ") : undefined });
     } catch (error) {
       checks.push({ name: "dl-analyze", status: "NOT VERIFIED", reason: error.message });
     }
   }
 }
 
-async function checkContracts(task, paths, run) {
+async function checkContracts(task, paths, checks, run) {
   let performance = "NOT APPLICABLE";
   if (task.contract) {
     if (!task.approved) throw new Error(task.contractIssue || "approved contract unavailable");
     const path = task.approved;
     performance = await run("performance contract", [join(scripts, "dl-perf-gate"), path, "--isolated",
       "--candidate-dir", task.candidate], true);
+    const contract = await read(path);
+    const coverage = contractCoverage(contract.benchmark, task.candidate, task.root, contract.workload);
+    checks.at(-1).coverage = coverage;
+    if (performance === "PASS" && checks.at(-1).data.status === "VERIFIED")
+      checks.push({ name: "approved workload oracle", status: "PASS", coverage: { ...coverage, type: "oracle",
+        invariants: [contract.benchmark.oracle?.kind ?? "exact"] } });
   } else if (task.base && paths.length) {
     performance = await run("approved contracts", [join(scripts, "dl-perf-gate"), "--changed"], true,
-      { ...process.env, DL_PERF_BASE: task.base, DL_PERF_PROJECT_SCOPE: paths.some(p => !/\.(md|rst)$/i.test(p)) ? "1" : "0" });
+      { ...process.env, DL_PERF_BASE: task.base, DL_PERF_PROJECT_SCOPE: paths.some(p => !documentation(p)) ? "1" : "0" });
+    for (const report of checks.at(-1).data.contracts ?? []) {
+      if (report.status !== "VERIFIED" || !report.scope) continue;
+      const { contract, candidate_root, workload } = report.scope;
+      const coverage = contractCoverage(report.scope, resolve(task.root, candidate_root), task.root, workload);
+      checks.push({ name: "approved workload oracle " + contract, status: "PASS", coverage: { ...coverage, type: "oracle" } });
+    }
   }
   return performance;
 }
@@ -128,46 +158,106 @@ export async function verify(task, signal, budget = 20000, probe) {
   const options = () => ({ cwd: task.root, signal, timeout: until - Date.now() });
   const checks = [];
   let source;
+  let workspaceHash;
   let paths = [];
+  let area = [];
   const run = (...args) => record(checks, options, ...args);
   try {
     const { baseline, current } = await verifiedInputs(task, options());
     source = digest(JSON.stringify(current));
-    paths = changes(baseline, current);
-    const files = await regular(task.root, paths);
-    const sources = files.filter(supported);
-    const code = paths.some(p => !/\.(md|rst|txt|png|jpg|svg|ico)$/i.test(p));
-    await checkScope(task, baseline, current, paths, files, options, checks, run);
-    await checkSemantics(task, files, source, checks, options, probe);
-    await checkAnalyzers(task, sources, options, checks);
-    if (sources.length && (task.policy.semgrepConfig || task.policy.requiredAnalyzers?.includes("semgrep")))
-      checks.push(await checkSemgrep(task, sources, source, options()));
-    await checkRequirements(task, paths, code, checks, run);
-    if (source !== digest(JSON.stringify(await snapshot(task.cwd, options()))))
-      checks.push({ name: "workspace changed during verification", status: "NOT VERIFIED" });
+    workspaceHash = current.fingerprint;
+    paths = source === task.baselineHash ? [] : changes(baseline, current);
+    area = paths.length ? changedArea(paths, { ...baseline.files, ...current.files }) : [];
+    observeRoute(task, paths, area);
+    const readOnly = !paths.length && task.route?.readOnly && !task.refactor;
+    if (!readOnly) {
+      await reviewChanges(task, { baseline, current, paths, area, source, checks, options, probe, run });
+      if (!checks.some(check => check.status === "BLOCKED")) {
+        if (source !== digest(JSON.stringify(await snapshot(task.cwd, options()))))
+          checks.push({ name: "workspace changed during verification", status: "NOT VERIFIED" });
+        await verifyToolInputs(task, options());
+      }
+    }
   } catch (error) {
     checks.push({ name: "verification", status: signal?.aborted ? "CANCELLED" : "NOT VERIFIED", reason: error.message });
   }
   task.analysisMs = Math.max(0, task.analysisMs - (Date.now() - started));
-  if (signal?.aborted || Date.now() >= task.deadline)
+  if (signal?.aborted || Date.now() >= until)
     checks.push({ name: "verification interrupted", status: signal?.aborted ? "CANCELLED" : "BLOCKED" });
-  return receiptFor(task, checks, paths, source, started);
+  return receiptFor(task, checks, area, source, workspaceHash, started);
 }
 
-async function checkRequirements(task, paths, code, checks, run) {
+function observeRoute(task, paths, area) {
+  const changed = area.filter(row => !documentation(row.path));
+  if (task.mode === "Standard" && changed.some(row => task.policy.performancePaths?.some(p => contains(p, row.path)))) {
+    task.mode = "Performance";
+    if (task.route) task.route.mode = task.mode;
+  }
+  const components = new Set(changed.map(row => row.component));
+  if (task.route) {
+    task.route.scope = !paths.length ? "read-only" : paths.length === 1 ? "one file" :
+      task.route.scope === "project" ? "project" : components.size > 1 ? "multiple components" : "multiple files";
+    if (components.size > 1 || changed.some(row => row.interface)) task.route.risk = "high";
+    else if (changed.length && task.route.risk === "low") task.route.risk = "medium";
+  }
+}
+
+async function reviewChanges(task, { baseline, current, paths, area, source, checks, options, probe, run }) {
+  const files = await regular(task.root, paths);
+  const sources = files.filter(supported);
+  await checkScope(task, baseline, current, paths, files, options, checks, run);
+  if (checks.some(check => check.status === "BLOCKED")) return;
+  await checkSemantics(task, files, source, checks, options, probe);
+  await checkAnalyzers(task, sources, options, checks);
+  if (sources.length && (task.policy.semgrepConfig || task.policy.requiredAnalyzers?.includes("semgrep"))) {
+    const check = await checkSemgrep(task, sources, source, options());
+    checks.push({ ...check, coverage: { type: "static", paths: check.data?.paths?.scanned ?? [] } });
+  }
+  if (task.route?.intent === "documentation" && task.base && paths.length <= 12) {
+    for (const path of paths.filter(p => p.endsWith(".py"))) {
+      const before = baseline.files[path]?.[1];
+      const after = current.files[path]?.[1];
+      if (typeof before?.[0] === "number" && before[0] === after?.[0] &&
+          await samePython(task, path, before[1], options()))
+        checks.push({ name: "unchanged Python syntax " + path, status: "PASS",
+          coverage: { type: "functional", exact: true, paths: [path], invariants: ["identical Python AST and shebang"] } });
+    }
+  }
+  await checkRequirements(task, paths, area, checks, run);
+  await verifyMilestone(task, paths, checks, options());
+}
+
+async function checkRequirements(task, paths, area, checks, run) {
+  const code = paths.some(p => !documentation(p));
+  if (!code && (task.route?.readOnly || task.route?.intent === "documentation")) return;
+  await approvedCommands(task, checks, run);
+  const performance = await checkContracts(task, paths, checks, run);
+  if (task.designIssue) checks.push({ name: "design", status: "BLOCKED", reason: task.designIssue });
+  const missing = coverageFor(area, checks).filter(row => row.status === "NOT VERIFIED");
+  if (missing.length)
+    checks.push({ name: "functional verification", status: "NOT VERIFIED", missing,
+      reason: "Approve or run a scoped functional check for " +
+        missing.slice(0, 5).map(row => row.interface ? row.path + " [" + row.affectedComponents.join(", ") + "]" : row.path).join(", ") });
+  if (task.mode !== "Standard" && performance === "NOT APPLICABLE")
+    checks.push({ name: "approved experimental contract", status: "NOT VERIFIED" });
+}
+
+async function approvedCommands(task, checks, run) {
   if (task.policy.profile) {
     const spec = task.policy.profile;
     const argv = [join(scripts, "dl-profile"), ...Object.entries(spec.max ?? {}).flatMap(([k,v]) => ["--max", k + "=" + v]),
       spec.metric, "--", ...spec.argv];
     await run("trusted profile", argv, true);
+    checks.at(-1).coverage = { type: "resource", workloads: [spec.argv] };
   }
-  if (task.policy.tests) await run("functional tests", task.policy.tests, false);
-  for (const step of task.policy.checks ?? []) await run("plan: " + step.name, step.argv, false);
-  const performance = await checkContracts(task, paths, run);
-  if (task.designIssue) checks.push({ name: "design", status: "BLOCKED", reason: task.designIssue });
-  if ((code && !task.policy.tests || task.mode !== "Standard") && performance === "NOT APPLICABLE")
-    checks.push({ name: task.mode === "Standard" ? "functional verification" : "approved experimental contract",
-      status: "NOT VERIFIED" });
+  if (task.policy.tests) {
+    await run("functional tests", task.policy.tests, false);
+    checks.at(-1).coverage = { type: "functional", paths: task.policy.testsScope ?? [] };
+  }
+  for (const step of task.policy.checks ?? []) {
+    await run("plan: " + step.name, step.argv, false);
+    checks.at(-1).coverage = { type: step.type ?? "policy", paths: step.scope ?? [] };
+  }
 }
 
 async function record(checks, options, name, argv, json, env = process.env) {
@@ -181,12 +271,22 @@ async function record(checks, options, name, argv, json, env = process.env) {
   return status;
 }
 
+export async function verifyToolInputs(task, options) {
+  if (JSON.stringify(await inventory(task.root, task.policy, options)) !== JSON.stringify(task.tools))
+    throw new Error("verification inputs, analyzer installation or Core changed");
+  if (task.approved && task.approvalHash !== await approvalHash(task, options)) throw new Error("approved fixtures changed");
+  if (task.policyFile && task.policyHash !== digest(await readFile(task.policyFile)))
+    throw new Error("operator policy changed");
+  if (task.policy.semgrepConfig && task.semgrepConfigHash !== digest(await readFile(task.policy.semgrepConfig)))
+    throw new Error("Semgrep configuration changed");
+}
+
 async function verifiedInputs(task, options) {
-  if (task.tools.omp !== "omp/19.2.1") throw new Error("OMP version outside verified compatibility");
-  if (JSON.stringify(await inventory(task.root, task.policy)) !== JSON.stringify(task.tools)) throw new Error("verification inputs, analyzer installation or Core changed");
+  if (task.enforcement === false || compatibility(task.tools.omp).lifecycle !== "VERIFIED")
+    throw new Error("Mandatory OMP lifecycle enforcement is NOT VERIFIED for " + task.tools.omp);
+  await verifyToolInputs(task, options);
   const baseline = await read(join(task.directory, "baseline.json"));
   if (task.baselineHash !== digest(JSON.stringify(baseline))) throw new Error("baseline receipt changed");
-  if (task.approved && task.approvalHash !== await approvalHash(task)) throw new Error("approved fixtures changed");
   const current = await snapshot(task.cwd, options);
   if (baseline.root !== current.root || baseline.git !== current.git) throw new Error("workspace identity changed");
   if (current.git && !task.base && Object.keys(current.files).some(p => p.startsWith(".performance/")))
@@ -194,11 +294,14 @@ async function verifiedInputs(task, options) {
   return { baseline, current };
 }
 
-async function receiptFor(task, checks, paths, source, started) {
+async function receiptFor(task, checks, area, source, workspaceHash, started) {
   const failures = checks.filter(c => !["PASS", "WARNING", "NOT APPLICABLE"].includes(c.status));
   const status = failures[0]?.status ?? "PASS";
   const receipt = join(task.directory, "gate-" + randomUUID() + ".json");
-  const evidence = { task: task.id, baseline: task.base, policy: task.policy, toolIdentity: digest(JSON.stringify(task.tools)), source, paths, checks, status, diagnostics: gateFindings(checks, task.root),
+  const paths = area.map(row => row.path);
+  const evidence = { version: 2, task: task.id, baseline: task.base, baselineHash: task.baselineHash,
+    route: task.route, policy: task.policy, toolIdentity: digest(JSON.stringify(task.tools)), source, workspaceHash, paths, checks, status,
+    coverage: coverageFor(area, checks), diagnostics: gateFindings(checks, task.root),
     elapsedMs: Date.now() - started };
   await save(receipt, evidence);
   const scaling = checks.flatMap(c => (c.data?.contracts ?? [c.data]).map(scalingSummary).filter(Boolean)).slice(0, 2);
