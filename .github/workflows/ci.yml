@@ -83,6 +83,7 @@ jobs:
         env:
           OMP_VERSION: ${{ matrix.version }}
           OMP_SHA256: ${{ matrix.sha256 }}
+          SCENARIO: ${{ matrix.scenario }}
         run: |
           set -euo pipefail
           bin="$RUNNER_TEMP/omp-bin"
@@ -95,7 +96,16 @@ jobs:
           sudo apt-get install -y bubblewrap dbus-user-session clangd
           pip install -r requirements-dev.txt python-lsp-server==1.14.0 pexpect==4.9.0 memray==1.19.1
           npm install --global @ast-grep/cli@0.51.3 typescript-language-server@5.1.3 typescript@5.9.3
+          if [ "$SCENARIO" = autoresearch_smoke ] || [ "$SCENARIO" = engineering_evolution ]; then
+            sudo install -d /etc/systemd/system/user@.service.d
+            printf '[Service]\nDelegate=cpu io memory pids\n' |
+              sudo tee /etc/systemd/system/user@.service.d/deadlion-ci.conf >/dev/null
+            sudo systemctl daemon-reload
+          fi
           sudo loginctl enable-linger "$USER"
+          if [ "$SCENARIO" = autoresearch_smoke ] || [ "$SCENARIO" = engineering_evolution ]; then
+            sudo systemctl restart "user@$(id -u).service"
+          fi
           echo "$bin" >> "$GITHUB_PATH"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
@@ -118,6 +128,13 @@ jobs:
             }
             if ! nested_isolation; then
               echo "UNSUPPORTED — nested Linux isolation unavailable" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if ! systemd-run --user --wait --collect --pipe --quiet -p CPUQuota=100% /bin/sh -ec '
+              group=$(cut -d: -f3 /proc/self/cgroup)
+              test "$(cut -d" " -f1 "/sys/fs/cgroup$group/cpu.max")" != max
+            '; then
+              echo "UNSUPPORTED — delegated CPU quota unavailable" | tee -a "$GITHUB_STEP_SUMMARY"
               exit 1
             fi
           fi
